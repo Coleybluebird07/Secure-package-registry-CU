@@ -6,25 +6,50 @@ date = "2026-02-02"
 status = "draft"
 +++
 ## Summary
-This RFC proposes the initial user interface wireframe for the Secure Package Registry.
+This RFC defines the initial user interface structure and **data requirements**
+for the Secure Package Registry. The accompanying wireframe is **low-fidelity**
+and intended to illustrate layout and information hierarchy rather than final
+visual design.
 
 ## Problem
-Users require a clear interface to authenticate, request package verification,
-and view package risk and analysis status.
+Users need a clear way to:
+- Search for packages in the secure registry
+- View package verification status
+- Request verification for unverified packages
+
+The UI must reflect the system’s role as an **alternative package registry**,
+rather than a vulnerability scanning or threat-intelligence platform.
+
+## Data Requirements (Initial Version)
+
+The primary interface must display the following information:
+
+- Package name
+- Package version
+- Verification status:
+    - Reproducible
+    - Behavioral consistency
+    - Verification pending
+    - Verification failed
+- Date of last verification
+- Action to request verification (if unverified)
+
+## User Interaction Flow (v1)
+
+1. User searches for a package
+2. Registry returns matching packages and versions
+3. Verification status is displayed for each result
+4. If a package is unverified, the user may request verification
+5. Status updates asynchronously once analysis completes
 
 ## Recommendation
-The wireframe should outline the basic layout, structure, and key components of the UI.
-It should include placeholders for essential elements such as navigation menus, content areas, buttons, and forms.
+A low-fidelity Excalidraw mockup accompanies this RFC and focuses on
+data requirements and interaction flow rather than visual design.
 
 The wireframe is stored at:
-`design/wireframes/initial-ui-wireframe.fig`
+`design/wireframes/initial-ui-wireframe.excalidraw`
 
 ## Open Questions
-- How should we structure the navigation menu for optimal user experience?
-- What color schemes and typography should we use to align with our brand identity?
-- Should we include any interactive elements in the wireframe, such as hover effects or animations?
-- How can we ensure the wireframe is accessible to all users, including those with disabilities?
-- What feedback mechanisms should we incorporate to gather user input on the wireframe design?
-- How will the wireframe adapt to different screen sizes and devices (responsive design)?
-- Are there any specific user flows or scenarios that need to be highlighted in the wireframe?
-- How should risk severity levels be visually represented?
+- Should verification status be shown as tags, icons, or text labels?
+- Is a package detail view required in v1, or are search results sufficient?
+- What metadata (if any) should be exposed beyond verification status?
