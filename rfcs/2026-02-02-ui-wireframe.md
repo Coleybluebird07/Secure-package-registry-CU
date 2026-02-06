@@ -34,6 +34,12 @@ The primary interface must display the following information:
 - Date of last verification
 - Action to request verification (if unverified)
 
+## Input Methods (Initial Version)
+The initial UI supports a search-based  interaction model consistent with an alternative package registry.
+User search for packages by name and version. Upload SBOMs (eg. CycloneDX), dependency files (package.json, go.mod) or 
+manually selecting dependencies are initially deferred to future interactions.
+This allows early development using mocked data while keeping the ui aligned with core registry workflow.
+
 ## User Interaction Flow (v1)
 
 1. User searches for a package
