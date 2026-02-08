@@ -23,16 +23,36 @@ services:
     volumes:
       # Uncomment when necessary. No persistence necessary for testing phase
       # - ./data/gitea:/data:Z
-      - /usr/share/zoneinfo/UTC:/etc/timezone:ro
-      - /etc/localtime:/etc/localtime:ro
+      # - /usr/share/zoneinfo/UTC:/etc/timezone:ro
+      # - /etc/localtime:/etc/localtime:ro
       - ./infra/gitea-custom/:/data/gitea/custom:z
     ports:
       - "127.0.0.1:7002:3000" # TODO: How should we deal with ssh? Necessary?
     entrypoint: ["/bin/sh","-c"]
     command:
-      - | # Will run every time on startup but commands are idempotent so no worries
+      # Will run every time on startup but commands are idempotent so no worries
+      - |
+        set -x
         echo 'su-exec git /usr/local/bin/gitea migrate' >> /etc/s6/gitea/setup
-        echo 'su-exec git /usr/local/bin/gitea admin user create --username '${GITEA_ADMIN}' --password '${GITEA_ADMIN_PASSWORD}' --email admin@local --admin --must-change-password=false' >> /etc/s6/gitea/setup
+        echo 'su-exec git /usr/local/bin/gitea admin user create \
+        --username '${GITEA_ADMIN}' \
+        --password '${GITEA_ADMIN_PASSWORD}' \
+        --email admin@local \
+        --admin \
+        --must-change-password=false' \
+        --access-token=true \
+        >> /etc/s6/gitea/setup
+
+        # NOTE: this line is not idempotent, it will generate a new token every time.
+        # sed command is used to extract the token value from the output.
+        # "Access token was successfully created: <token>" -> "<token>"
+        echo 'su-exec git /usr/local/bin/gitea admin user generate-access-token \
+        --username '${GITEA_ADMIN}' \
+        --token-name "spr-admin-token" \
+        --scopes "all" \
+        > /data/gitea/custom/spr-admin.token
+        ' >> /etc/s6/gitea/setup
+
         /usr/bin/entrypoint /usr/bin/s6-svscan /etc/s6
     depends_on:
       gitea_db:
