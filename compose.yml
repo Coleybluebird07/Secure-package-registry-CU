@@ -49,7 +49,7 @@ services:
         echo 'su-exec git /usr/local/bin/gitea admin user generate-access-token \
         --username '${GITEA_ADMIN}' \
         --token-name "spr-admin-token" \
-        --scopes "all" \
+        --scopes "all" | sed "s/^.*: //" \
         > /data/gitea/custom/spr-admin.token
         ' >> /etc/s6/gitea/setup
 

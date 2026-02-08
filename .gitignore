@@ -1,7 +1,6 @@
 # Generated tokens
 *.token
 
-
 # Dependencies
 node_modules/
 
