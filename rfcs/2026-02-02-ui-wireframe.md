@@ -59,3 +59,7 @@ The wireframe is stored at:
 - Should verification status be shown as tags, icons, or text labels?
 - Is a package detail view required in v1, or are search results sufficient?
 - What metadata (if any) should be exposed beyond verification status?
+
+## Future Wireframe
+- This is an initial future wireframe for 3 main frontend pages of the application.
+![WireframeFuture.svg](/uploads/f97655130990c58a53eb13dd15147ff3/WireframeFuture.svg)
