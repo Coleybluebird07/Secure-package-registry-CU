@@ -40,4 +40,3 @@ func SetLevel(level zerolog.Level) {
 func WithComponent(name string) zerolog.Logger {
 	return log.With().Str("component", name).Logger()
 }
-
