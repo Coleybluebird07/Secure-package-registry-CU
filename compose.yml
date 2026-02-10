@@ -69,3 +69,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  valkey_db:
+    image: docker.io/valkey/valkey:9.0.2-alpine
+    environment:
+      - VALKEY_PASSWORD=valkey
+    command:
+    - valkey-server
+    - --requirepass
+    - ${VALKEY_PASSWORD}
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    # volumes:
+      # Uncomment when necessary
+      # - ./data/valkey:/data:Z
+
+
