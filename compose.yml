@@ -33,31 +33,95 @@ services:
       # Will run every time on startup but commands are idempotent so no worries
       - |
         set -x
-        echo 'su-exec git /usr/local/bin/gitea migrate' >> /etc/s6/gitea/setup
-        echo 'su-exec git /usr/local/bin/gitea admin user create \
-        --username '${GITEA_ADMIN}' \
-        --password '${GITEA_ADMIN_PASSWORD}' \
-        --email admin@local \
-        --admin \
-        --must-change-password=false' \
-        --access-token=true \
-        >> /etc/s6/gitea/setup
+        apk update
+        apk add valkey valkey-cli
 
-        # NOTE: this line is not idempotent, it will generate a new token every time.
-        # sed command is used to extract the token value from the output.
-        # "Access token was successfully created: <token>" -> "<token>"
-        echo 'su-exec git /usr/local/bin/gitea admin user generate-access-token \
-        --username '${GITEA_ADMIN}' \
-        --token-name "spr-admin-token" \
-        --scopes "all" | sed "s/^.*: //" \
-        > /data/gitea/custom/spr-admin.token
-        ' >> /etc/s6/gitea/setup
+        echo 'su-exec git /usr/local/bin/gitea migrate' >> /etc/s6/gitea/setup
+
+        echo 'FULL_STRING=$(su-exec git /usr/local/bin/gitea admin user create \
+          --username "$GITEA_ADMIN" \
+          --password "$GITEA_ADMIN_PASSWORD" \
+          --email admin@local \
+          --admin \
+          --must-change-password=false \
+          --access-token=true)' >> /etc/s6/gitea/setup
+
+        # echo '
+        #   echo "Pre-full String"
+        # ' >> /etc/s6/gitea/setup
+        #
+        # echo '
+        #   FULL_STRING=$(su-exec git /usr/local/bin/gitea admin user generate-access-token \
+        #         --username '${GITEA_ADMIN}' \
+        #         --token-name "spr-admin-token" \
+        #         --scopes "all")
+        # ' >> /etc/s6/gitea/setup
+        #
+        # echo '
+        #   echo "Pre-Token"
+        # ' >> /etc/s6/gitea/setup
+        #
+        # echo '
+        #   TOKEN=$(echo "$FULL_STRING" | grep -oE '\''[a-f0-9]{40}'\'')
+        # '
+
+        echo 'echo "Full String: $FULL_STRING"' >> /etc/s6/gitea/setup
+        echo 'echo "Generated Token: $TOKEN"' >> /etc/s6/gitea/setup
+
+        echo 'valkey-cli -h valkey_db -p 6379 SETNX gitea:tokens:admin "$TOKEN"' >> /etc/s6/gitea/setup
+        # cat >> /etc/s6/gitea/setup <<'EOF'
+        #   su-exec git /usr/local/bin/gitea migrate
+        #
+        #   FULL_STRING=$(su-exec git /usr/local/bin/gitea admin user create \
+        #   --username "$GITEA_ADMIN" \
+        #   --password "$GITEA_ADMIN_PASSWORD" \
+        #   --email admin@local \
+        #   --admin \
+        #   --must-change-password=false \
+        #   --access-token=true)
+        #
+        #   TOKEN=$FULL_STRING | grep -oE '[a-f0-9]{40}'
+        #
+        #   echo "Full String: $FULL_STRING"
+        #   echo "Generated Token: $TOKEN"
+        #
+        #   valkey-cli -h valkey_db -p 6379 SETNX gitea:tokens:admin "$TOKEN"
+        # EOF
+        #
+        #
+          # echo $GITEA_ADMIN $GITEA_ADMIN_PASSWORD
+          #
+          #
+          # # If token doesnt exist, create it. Otherwise, do nothing.
+          #
+          # # Debug
+          # echo "Checking if token exists..."
+          # su-exec git /usr/local/bin/gitea admin user list-access-tokens \
+          #   --username '$GITEA_ADMIN' \
+          #   | grep -q "spr-admin-token"
+          #
+          # if ! su-exec git /usr/local/bin/gitea admin user list-access-tokens \
+          #   --username '$GITEA_ADMIN' \
+          #   | grep -q "spr-admin-token"
+          # then
+          #   # sed command is used to extract the token value from the output.
+          #   # "Access token was successfully created: <token>" -> "<token>"
+          #   TOKEN=$(
+          #     su-exec git /usr/local/bin/gitea admin user generate-access-token \
+          #     --username '$GITEA_ADMIN' \
+          #     --token-name "spr-admin-token" | sed "s/^.*: //"
+          #   )
+          #   echo "Generated Token: $TOKEN"
+          #
+          # fi
 
         /usr/bin/entrypoint /usr/bin/s6-svscan /etc/s6
     depends_on:
       gitea_db:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      valkey_db:
         condition: service_healthy
   minio:
     image: docker.io/minio/minio:latest
@@ -96,10 +160,13 @@ services:
     environment:
       - ALLOW_EMPTY_PASSWORD=true
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD}", "ping"]
+      test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
-    # volumes:
-      # Uncomment when necessary
-      # - ./data/valkey:/data:Z
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+volumes:
+  valkey_data:
