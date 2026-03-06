@@ -98,6 +98,17 @@ func (ns NullPkgVtype) Value() (driver.Value, error) {
 	return string(ns.PkgVtype), nil
 }
 
+type Organisation struct {
+	ID   int32
+	Name string
+}
+
+type OrganisationPackage struct {
+	ID             int32
+	OrganisationID int32
+	PackageID      int32
+}
+
 type Account struct {
 	ID                    string
 	AccountId             string
@@ -184,6 +195,14 @@ type PackageVersionTag struct {
 	Value          []byte
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+}
+
+type User struct {
+	ID             int32
+	Username       string
+	Email          string
+	PasswordHash   string
+	OrganisationID pgtype.Int4
 }
 
 type Session struct {
