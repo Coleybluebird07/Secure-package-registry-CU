@@ -104,6 +104,8 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=core
+    ports:
+      - "127.0.0.1:5432:5432"
     # volumes:
       # Uncomment when necessary
       # - ./data/core_db:/var/lib/postgresql/data:Z
