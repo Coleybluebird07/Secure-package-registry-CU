@@ -2,70 +2,179 @@
 	import { authClient } from '$lib/client';
 	import { goto } from '$app/navigation';
 
-	let email = $state('');
-	let password = $state('');
-	let error = $state('');
-	let loading = $state(false);
+	let activeTab: 'login' | 'register' = $state('login');
 
-	async function handleSubmit(e: Event) {
+	// Login state
+	let loginEmail = $state('');
+	let loginPassword = $state('');
+	let loginError = $state('');
+	let loginLoading = $state(false);
+
+	// Register state
+	let firstName = $state('');
+	let lastName = $state('');
+	let registerEmail = $state('');
+	let registerPassword = $state('');
+	let confirmPassword = $state('');
+	let registerError = $state('');
+	let registerLoading = $state(false);
+
+	async function handleLogin(e: Event) {
 		e.preventDefault();
-		loading = true;
-		error = '';
+		loginLoading = true;
+		loginError = '';
 
-		const { data, error: authError } = await authClient.signIn.email({ email, password });
+		const { data, error } = await authClient.signIn.email({ email: loginEmail, password: loginPassword });
 
-		if (authError) {
-			error = authError.message ?? 'Sign in failed';
+		if (error) {
+			loginError = error.message ?? 'Sign in failed';
 		} else {
 			goto('/');
 		}
-		loading = false;
+		loginLoading = false;
+	}
+
+	async function handleRegister(e: Event) {
+		e.preventDefault();
+		if (registerPassword !== confirmPassword) {
+			registerError = 'Passwords do not match';
+			return;
+		}
+		registerLoading = true;
+		registerError = '';
+
+		const { data, error } = await authClient.signUp.email({
+			email: registerEmail,
+			password: registerPassword,
+			name: `${firstName} ${lastName}`.trim()
+		});
+
+		if (error) {
+			registerError = error.message ?? 'Sign up failed';
+		} else {
+			goto('/');
+		}
+		registerLoading = false;
 	}
 </script>
 
-<div class="login-page">
-	<div class="login-container">
-		<div class="login-card">
-			<h1>Sign In</h1>
-			<p class="login-subtitle">Access your secure package registry</p>
-
-			<form class="login-form" onsubmit={handleSubmit}>
-				<div class="form-group">
-					<label for="email">Email</label>
-					<input type="email" id="email" name="email" placeholder="you@example.com" required bind:value={email} />
-				</div>
-
-				<div class="form-group">
-					<label for="password">Password</label>
-					<input type="password" id="password" name="password" placeholder="••••••••" required bind:value={password} />
-				</div>
-
-				{#if error}
-					<p class="error-message">{error}</p>
-				{/if}
-
-				<div class="form-options">
-					<label class="checkbox">
-						<input type="checkbox" name="remember" />
-						<span>Remember me</span>
-					</label>
-					<a href="/forgot-password" class="forgot-link">Forgot password?</a>
-				</div>
-
-				<button type="submit" class="submit-button" disabled={loading}>
-					{loading ? 'Signing in...' : 'Sign In'}
+<div class="auth-page">
+	<div class="auth-container">
+		<div class="auth-card">
+			<div class="tab-bar">
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'login'}
+					onclick={() => (activeTab = 'login')}
+				>
+					Sign In
 				</button>
-			</form>
-
-			<div class="form-footer">
-				<p>Don't have an account? <a href="/register">Sign up</a></p>
+				<button
+					class="tab-btn"
+					class:active={activeTab === 'register'}
+					onclick={() => (activeTab = 'register')}
+				>
+					Register
+				</button>
 			</div>
+
+			{#if activeTab === 'login'}
+				<div class="form-section">
+					<h1>Welcome back</h1>
+					<p class="subtitle">Access your secure package registry</p>
+
+					<form onsubmit={handleLogin}>
+						<div class="form-group">
+							<label for="login-email">Email</label>
+							<input type="email" id="login-email" placeholder="you@example.com" required bind:value={loginEmail} />
+						</div>
+
+						<div class="form-group">
+							<label for="login-password">Password</label>
+							<input type="password" id="login-password" placeholder="••••••••" required bind:value={loginPassword} />
+						</div>
+
+						{#if loginError}
+							<p class="error-message">{loginError}</p>
+						{/if}
+
+						<div class="form-options">
+							<label class="checkbox">
+								<input type="checkbox" name="remember" />
+								<span>Remember me</span>
+							</label>
+							<a href="/forgot-password" class="forgot-link">Forgot password?</a>
+						</div>
+
+						<button type="submit" class="submit-button" disabled={loginLoading}>
+							{loginLoading ? 'Signing in...' : 'Sign In'}
+						</button>
+					</form>
+
+					<p class="switch-prompt">
+						Don't have an account?
+						<button class="switch-link" onclick={() => (activeTab = 'register')}>Register</button>
+					</p>
+				</div>
+			{:else}
+				<div class="form-section">
+					<h1>Create account</h1>
+					<p class="subtitle">Get started with secure package verification</p>
+
+					<form onsubmit={handleRegister}>
+						<div class="form-row">
+							<div class="form-group">
+								<label for="firstName">First Name</label>
+								<input type="text" id="firstName" placeholder="John" required bind:value={firstName} />
+							</div>
+							<div class="form-group">
+								<label for="lastName">Last Name</label>
+								<input type="text" id="lastName" placeholder="Doe" required bind:value={lastName} />
+							</div>
+						</div>
+
+						<div class="form-group">
+							<label for="register-email">Email</label>
+							<input type="email" id="register-email" placeholder="you@company.com" required bind:value={registerEmail} />
+						</div>
+
+						<div class="form-group">
+							<label for="register-password">Password</label>
+							<input type="password" id="register-password" placeholder="••••••••" required bind:value={registerPassword} />
+							<span class="helper-text">At least 8 characters</span>
+						</div>
+
+						<div class="form-group">
+							<label for="confirmPassword">Confirm Password</label>
+							<input type="password" id="confirmPassword" placeholder="••••••••" required bind:value={confirmPassword} />
+						</div>
+
+						{#if registerError}
+							<p class="error-message">{registerError}</p>
+						{/if}
+
+						<label class="checkbox terms">
+							<input type="checkbox" required />
+							<span>I agree to the <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a></span>
+						</label>
+
+						<button type="submit" class="submit-button" disabled={registerLoading}>
+							{registerLoading ? 'Creating account...' : 'Create Account'}
+						</button>
+					</form>
+
+					<p class="switch-prompt">
+						Already have an account?
+						<button class="switch-link" onclick={() => (activeTab = 'login')}>Sign In</button>
+					</p>
+				</div>
+			{/if}
 		</div>
 	</div>
 </div>
 
 <style>
-	.login-page {
+	.auth-page {
 		min-height: 100vh;
 		display: flex;
 		align-items: center;
@@ -74,44 +183,82 @@
 		padding: 2rem;
 	}
 
-	.login-container {
+	.auth-container {
 		width: 100%;
-		max-width: 440px;
+		max-width: 480px;
 	}
 
-	.login-card {
+	.auth-card {
 		background: var(--card-bg);
 		border: 1px solid var(--card-border);
 		border-radius: 16px;
-		padding: 3rem;
 		box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+		overflow: hidden;
+	}
+
+	.tab-bar {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		border-bottom: 1px solid var(--card-border);
+	}
+
+	.tab-btn {
+		padding: 1rem;
+		background: none;
+		border: none;
+		font-size: 0.95rem;
+		font-weight: 500;
+		color: var(--text-secondary);
+		cursor: pointer;
+		transition: all 0.2s;
+	}
+
+	.tab-btn.active {
+		color: var(--accent);
+		border-bottom: 2px solid var(--accent);
+		margin-bottom: -1px;
+	}
+
+	.tab-btn:hover:not(.active) {
+		color: var(--text-primary);
+		background: var(--bg-primary);
+	}
+
+	.form-section {
+		padding: 2.5rem;
 	}
 
 	h1 {
-		font-size: 2rem;
+		font-size: 1.75rem;
 		font-weight: 700;
 		color: var(--text-primary);
-		margin-bottom: 0.5rem;
+		margin-bottom: 0.375rem;
 		text-align: center;
 	}
 
-	.login-subtitle {
+	.subtitle {
 		color: var(--text-secondary);
 		text-align: center;
-		margin-bottom: 2.5rem;
-		font-size: 0.95rem;
+		margin-bottom: 2rem;
+		font-size: 0.9rem;
 	}
 
-	.login-form {
+	form {
 		display: flex;
 		flex-direction: column;
-		gap: 1.5rem;
+		gap: 1.25rem;
+	}
+
+	.form-row {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 1rem;
 	}
 
 	.form-group {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: 0.4rem;
 	}
 
 	label {
@@ -120,17 +267,19 @@
 		color: var(--text-primary);
 	}
 
+	input[type='text'],
 	input[type='email'],
 	input[type='password'] {
-		padding: 0.875rem 1rem;
+		padding: 0.75rem 1rem;
 		border: 1px solid var(--border);
 		border-radius: 8px;
-		font-size: 1rem;
+		font-size: 0.95rem;
 		background: var(--bg-primary);
 		color: var(--text-primary);
 		transition: all 0.2s;
 	}
 
+	input[type='text']:focus,
 	input[type='email']:focus,
 	input[type='password']:focus {
 		outline: none;
@@ -143,6 +292,11 @@
 		opacity: 0.5;
 	}
 
+	.helper-text {
+		font-size: 0.8rem;
+		color: var(--text-secondary);
+	}
+
 	.form-options {
 		display: flex;
 		justify-content: space-between;
@@ -152,23 +306,40 @@
 
 	.checkbox {
 		display: flex;
-		align-items: center;
-		gap: 0.5rem;
+		align-items: flex-start;
+		gap: 0.6rem;
 		cursor: pointer;
 		color: var(--text-secondary);
+		font-size: 0.875rem;
+		line-height: 1.5;
+	}
+
+	.checkbox.terms {
+		margin-top: 0.25rem;
 	}
 
 	.checkbox input[type='checkbox'] {
 		width: 16px;
 		height: 16px;
+		margin-top: 0.15rem;
+		flex-shrink: 0;
 		cursor: pointer;
 		accent-color: var(--accent);
+	}
+
+	.checkbox a {
+		color: var(--accent);
+		text-decoration: none;
+	}
+
+	.checkbox a:hover {
+		text-decoration: underline;
 	}
 
 	.forgot-link {
 		color: var(--accent);
 		text-decoration: none;
-		transition: color 0.2s;
+		font-size: 0.875rem;
 	}
 
 	.forgot-link:hover {
@@ -185,7 +356,18 @@
 		font-weight: 600;
 		cursor: pointer;
 		transition: all 0.3s;
-		margin-top: 0.5rem;
+		margin-top: 0.25rem;
+	}
+
+	.submit-button:hover:not(:disabled) {
+		background: var(--accent-hover);
+		transform: translateY(-2px);
+		box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+	}
+
+	.submit-button:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	.error-message {
@@ -194,45 +376,35 @@
 		text-align: center;
 	}
 
-	.submit-button:hover {
-		background: var(--accent-hover);
-		transform: translateY(-2px);
-		box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
-	}
-
-	.form-footer {
-		margin-top: 2rem;
-		padding-top: 2rem;
-		border-top: 1px solid var(--border);
+	.switch-prompt {
+		margin-top: 1.5rem;
 		text-align: center;
-	}
-
-	.form-footer p {
 		color: var(--text-secondary);
 		font-size: 0.875rem;
 	}
 
-	.form-footer a {
+	.switch-link {
+		background: none;
+		border: none;
 		color: var(--accent);
-		text-decoration: none;
 		font-weight: 600;
+		cursor: pointer;
+		font-size: 0.875rem;
+		padding: 0;
 		transition: color 0.2s;
 	}
 
-	.form-footer a:hover {
+	.switch-link:hover {
 		color: var(--accent-hover);
 	}
 
-	/* Responsive */
-	@media (max-width: 768px) {
-		.login-card {
-			padding: 2rem;
+	@media (max-width: 520px) {
+		.form-section {
+			padding: 1.75rem;
 		}
 
-		.form-options {
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 1rem;
+		.form-row {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>
