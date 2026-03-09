@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Always run from the repo root regardless of where the script is called from
+cd "$(dirname "$0")/.."
+
 echo "Starting core_db..."
 podman compose up core_db -d
 
