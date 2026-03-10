@@ -1,24 +1,26 @@
-import { getRequestEvent } from "$app/server";
 import { betterAuth } from "better-auth";
+import { organization } from "better-auth/plugins";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { Pool } from "pg";
-import { organization } from "better-auth/plugins";
+import { getRequestEvent } from "$app/server";
 
 export const auth = betterAuth({
-    database: new Pool({
-        host: process.env.POSTGRES_HOST,
-        port: process.env.POSTGRES_PORT ? parseInt(process.env.POSTGRES_PORT) : 5432,
-        user: process.env.POSTGRES_USER,
-        password: process.env.POSTGRES_PASSWORD,
-        database: process.env.POSTGRES_DB,
-    }),
+	database: new Pool({
+		database: process.env.POSTGRES_DB,
+		host: process.env.POSTGRES_HOST,
+		password: process.env.POSTGRES_PASSWORD,
+		port: process.env.POSTGRES_PORT
+			? Number.parseInt(process.env.POSTGRES_PORT)
+			: 5432,
+		user: process.env.POSTGRES_USER,
+	}),
 
-    emailAndPassword: {
-        enabled: true,
-    },
+	emailAndPassword: {
+		enabled: true,
+	},
 
-    plugins: [
-        organization(),
-        sveltekitCookies(getRequestEvent) // make sure this is the last plugin in the array
-    ],
+	plugins: [
+		organization(),
+		sveltekitCookies(getRequestEvent), // make sure this is the last plugin in the array
+	],
 });

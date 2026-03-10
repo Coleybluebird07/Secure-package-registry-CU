@@ -24,7 +24,10 @@
 		loginLoading = true;
 		loginError = '';
 
-		const { data, error } = await authClient.signIn.email({ email: loginEmail, password: loginPassword });
+		const { data, error } = await authClient.signIn.email({
+			email: loginEmail,
+			password: loginPassword
+		});
 
 		if (error) {
 			loginError = error.message ?? 'Sign in failed';
@@ -86,12 +89,24 @@
 					<form onsubmit={handleLogin}>
 						<div class="form-group">
 							<label for="login-email">Email</label>
-							<input type="email" id="login-email" placeholder="you@example.com" required bind:value={loginEmail} />
+							<input
+								type="email"
+								id="login-email"
+								placeholder="you@example.com"
+								required
+								bind:value={loginEmail}
+							/>
 						</div>
 
 						<div class="form-group">
 							<label for="login-password">Password</label>
-							<input type="password" id="login-password" placeholder="••••••••" required bind:value={loginPassword} />
+							<input
+								type="password"
+								id="login-password"
+								placeholder="••••••••"
+								required
+								bind:value={loginPassword}
+							/>
 						</div>
 
 						{#if loginError}
@@ -125,7 +140,13 @@
 						<div class="form-row">
 							<div class="form-group">
 								<label for="firstName">First Name</label>
-								<input type="text" id="firstName" placeholder="John" required bind:value={firstName} />
+								<input
+									type="text"
+									id="firstName"
+									placeholder="John"
+									required
+									bind:value={firstName}
+								/>
 							</div>
 							<div class="form-group">
 								<label for="lastName">Last Name</label>
@@ -135,18 +156,36 @@
 
 						<div class="form-group">
 							<label for="register-email">Email</label>
-							<input type="email" id="register-email" placeholder="you@company.com" required bind:value={registerEmail} />
+							<input
+								type="email"
+								id="register-email"
+								placeholder="you@company.com"
+								required
+								bind:value={registerEmail}
+							/>
 						</div>
 
 						<div class="form-group">
 							<label for="register-password">Password</label>
-							<input type="password" id="register-password" placeholder="••••••••" required bind:value={registerPassword} />
+							<input
+								type="password"
+								id="register-password"
+								placeholder="••••••••"
+								required
+								bind:value={registerPassword}
+							/>
 							<span class="helper-text">At least 8 characters</span>
 						</div>
 
 						<div class="form-group">
 							<label for="confirmPassword">Confirm Password</label>
-							<input type="password" id="confirmPassword" placeholder="••••••••" required bind:value={confirmPassword} />
+							<input
+								type="password"
+								id="confirmPassword"
+								placeholder="••••••••"
+								required
+								bind:value={confirmPassword}
+							/>
 						</div>
 
 						{#if registerError}
@@ -155,7 +194,10 @@
 
 						<label class="checkbox terms">
 							<input type="checkbox" required />
-							<span>I agree to the <a href="/terms">Terms of Service</a> and <a href="/privacy">Privacy Policy</a></span>
+							<span
+								>I agree to the <a href="/terms">Terms of Service</a> and
+								<a href="/privacy">Privacy Policy</a></span
+							>
 						</label>
 
 						<button type="submit" class="submit-button" disabled={registerLoading}>

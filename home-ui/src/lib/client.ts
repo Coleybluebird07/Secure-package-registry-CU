@@ -6,6 +6,6 @@
 import { createAuthClient } from "better-auth/svelte";
 
 export const authClient = createAuthClient({
-    // Must match BETTER_AUTH_URL in .env
-    baseURL: "http://localhost:5173"
+	// Must match BETTER_AUTH_URL in .env
+	baseURL: "http://localhost:5173",
 });
