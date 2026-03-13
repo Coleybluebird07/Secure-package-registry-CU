@@ -1,5 +1,3 @@
-import type { Session, User } from "better-auth";
-
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 import type { auth } from "$lib/auth";

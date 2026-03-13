@@ -17,7 +17,7 @@ export const auth = betterAuth({
 		database: env.POSTGRES_DB,
 		host: env.POSTGRES_HOST,
 		password: env.POSTGRES_PASSWORD,
-		port: env.POSTGRES_PORT ? Number.parseInt(env.POSTGRES_PORT) : 5432,
+		port: env.POSTGRES_PORT ? Number.parseInt(env.POSTGRES_PORT, 10) : 5432,
 		user: env.POSTGRES_USER,
 	}),
 
