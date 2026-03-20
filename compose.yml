@@ -232,6 +232,20 @@ services:
       dockerfile: Containerfile
     ports:
       - '127.0.0.1:3001:3000'
+      - '127.0.0.1:3001:3000'
+    depends_on:
+      core_db:
+        condition: service_healthy
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      - POSTGRES_HOST=core_db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=core
+      - TRUSTED_ORIGINS=http://localhost:3001
+      - BETTER_AUTH_URL=http://localhost:3001
     healthcheck:
       test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3000/']
       interval: 5s
