@@ -1,11 +1,14 @@
 <script lang="ts">
-	// import { browser } from '$app/environment';
-	// import { isLoggedIn } from './utils/auth';
-
+	import { PUBLIC_DASHBOARD_BASE_URL } from '$env/static/public';
+	import { authClient } from '$lib/client';
 	export let isDark = true;
 	export let onToggleTheme: () => void;
+	export let user: { name: string; email: string } | null = null;
 
-	import { PUBLIC_DASHBOARD_BASE_URL } from '$env/static/public';
+	async function handleSignOut() {
+		await authClient.signOut();
+		window.location.href = '/login';
+	}
 </script>
 
 <header>
@@ -20,6 +23,12 @@
 		<button class="theme-toggle" on:click={onToggleTheme}>
 			{isDark ? 'Light' : 'Dark'}
 		</button>
+		{#if user}
+			<span class="user-name">{user.name}</span>
+			<button class="navbar-button" on:click={handleSignOut}>Sign Out</button>
+		{:else}
+			<a href="/login" class="navbar-button">Sign In</a>
+		{/if}
 		<a href="{PUBLIC_DASHBOARD_BASE_URL}/" class="navbar-button"> Get Started </a>
 	</div>
 </header>
@@ -94,6 +103,11 @@
 		font-weight: 500;
 		transition: color 0.3s;
 		cursor: pointer;
+	}
+
+	.user-name {
+		font-size: 0.875rem;
+		color: var(--text-secondary);
 	}
 
 	.nav-link {

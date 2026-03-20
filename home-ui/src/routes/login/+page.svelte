@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { authClient } from '$lib/client';
-	import { goto } from '$app/navigation';
 
 	let activeTab: 'login' | 'register' = $state('login');
 
@@ -32,7 +31,7 @@
 		if (error) {
 			loginError = error.message ?? 'Sign in failed';
 		} else {
-			goto('/');
+			window.location.href = '/';
 		}
 		loginLoading = false;
 	}
@@ -55,7 +54,7 @@
 		if (error) {
 			registerError = error.message ?? 'Sign up failed';
 		} else {
-			goto('/');
+			window.location.href = '/';
 		}
 		registerLoading = false;
 	}
