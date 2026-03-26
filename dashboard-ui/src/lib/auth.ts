@@ -17,6 +17,7 @@ export const auth = betterAuth({
 	}),
 
 	emailAndPassword: {
+		autoSignIn: false,
 		enabled: true,
 	},
 
@@ -25,4 +26,13 @@ export const auth = betterAuth({
 		apiKey(),
 		sveltekitCookies(getRequestEvent), // make sure this is the last plugin in the array
 	],
+
+	trustedOrigins: process.env.TRUSTED_ORIGINS
+		? process.env.TRUSTED_ORIGINS.split(",")
+		: [
+				"http://localhost:8000",
+				"http://localhost:5174",
+				"http://localhost:5173",
+				"http://localhost:3001",
+			],
 });
