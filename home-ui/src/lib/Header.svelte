@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { PUBLIC_DASHBOARD_BASE_URL } from '$env/static/public';
-	import { authClient } from '$lib/client';
-	export let isDark = true;
-	export let onToggleTheme: () => void;
-	export let user: { name: string; email: string } | null = null;
 
-	async function handleSignOut() {
-		await authClient.signOut();
-		window.location.href = '/login';
+	let {
+		isDark = true,
+		onToggleTheme,
+		user = null
+	}: {
+		isDark?: boolean;
+		onToggleTheme: () => void;
+		user: { name: string; email: string } | null;
+	} = $props();
+
+	function handleSignOut() {
+		window.location.href = `${PUBLIC_DASHBOARD_BASE_URL}/signout`;
 	}
 </script>
 
@@ -20,14 +25,14 @@
 		<a href="{PUBLIC_DASHBOARD_BASE_URL}/pricing" class="nav-link">Pricing</a>
 	</div>
 	<div class="header-right">
-		<button class="theme-toggle" on:click={onToggleTheme}>
+		<button class="theme-toggle" onclick={onToggleTheme}>
 			{isDark ? 'Light' : 'Dark'}
 		</button>
 		{#if user}
 			<span class="user-name">{user.name}</span>
-			<button class="navbar-button" on:click={handleSignOut}>Sign Out</button>
+			<button class="navbar-button" onclick={handleSignOut}>Sign Out</button>
 		{:else}
-			<a href="/login" class="navbar-button">Sign In</a>
+			<a href="{PUBLIC_DASHBOARD_BASE_URL}/login" class="navbar-button">Sign In</a>
 		{/if}
 		<a href="{PUBLIC_DASHBOARD_BASE_URL}/" class="navbar-button"> Get Started </a>
 	</div>
@@ -52,12 +57,12 @@
 		color: var(--bg-primary);
 		text-decoration: none;
 		padding: 0.5rem 1.75rem;
+		border: none;
 		border-radius: 6px;
-		font-size: 0.95rem;
-		font-weight: 500;
-		transition: background 0.2s;
 		font-size: 0.875rem;
 		font-weight: 500;
+		font-family: inherit;
+		cursor: pointer;
 		transition: color 0.3s;
 	}
 
