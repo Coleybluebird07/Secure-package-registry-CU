@@ -122,7 +122,11 @@
         throw new Error("Missing ecosystem or version in URL.");
       }
 
-      selectedPackage = await searchAPI.getVersion(ecosystem, identifier, version);
+      selectedPackage = await searchAPI.getVersion(
+        ecosystem,
+        identifier,
+        version,
+      );
       publishedAt = "Recently";
       activeTab = "Read Me";
     } catch (err) {
