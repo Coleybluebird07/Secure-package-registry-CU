@@ -68,7 +68,7 @@ CREATE TABLE collection_tasks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     -- Only one active (pending/running) task per package version + source at a time.
-    UNIQUE(package_version_id, source) 
+    UNIQUE(package_version_id, source)
 );
 
 CREATE INDEX idx_collection_tasks_status ON collection_tasks (status);
@@ -157,4 +157,13 @@ CREATE TABLE "apikey" (
     "permissions" text,
     "metadata" text
 );
+
+-- v5 - Package security levels
+
+CREATE TYPE SECURITY_LEVEL AS ENUM ('mirror', 'behavioural_analysis', 'attestations', 'repro_builds_external', 'repro_builds_internal');
+
+ALTER TABLE package_versions ADD COLUMN security_level SECURITY_LEVEL DEFAULT 'mirror';
+
+ALTER TABLE organization_packages ADD COLUMN security_level SECURITY_LEVEL DEFAULT 'mirror';
+
 

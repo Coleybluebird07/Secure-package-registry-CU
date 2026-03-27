@@ -143,6 +143,51 @@ func (ns NullPkgVtype) Value() (driver.Value, error) {
 	return string(ns.PkgVtype), nil
 }
 
+type SecurityLevel string
+
+const (
+	SecurityLevelMirror              SecurityLevel = "mirror"
+	SecurityLevelBehaviouralAnalysis SecurityLevel = "behavioural_analysis"
+	SecurityLevelAttestations        SecurityLevel = "attestations"
+	SecurityLevelReproBuildsExternal SecurityLevel = "repro_builds_external"
+	SecurityLevelReproBuildsInternal SecurityLevel = "repro_builds_internal"
+)
+
+func (e *SecurityLevel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SecurityLevel(s)
+	case string:
+		*e = SecurityLevel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SecurityLevel: %T", src)
+	}
+	return nil
+}
+
+type NullSecurityLevel struct {
+	SecurityLevel SecurityLevel
+	Valid         bool // Valid is true if SecurityLevel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSecurityLevel) Scan(value interface{}) error {
+	if value == nil {
+		ns.SecurityLevel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SecurityLevel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSecurityLevel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SecurityLevel), nil
+}
+
 type Account struct {
 	ID                    string
 	AccountId             string
@@ -232,6 +277,7 @@ type OrganizationPackage struct {
 	ID             int32
 	OrganizationID string
 	PackageID      int32
+	SecurityLevel  NullSecurityLevel
 }
 
 type Package struct {
@@ -262,6 +308,7 @@ type PackageVersion struct {
 	MaintainerNotes  pgtype.Text
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	SecurityLevel    NullSecurityLevel
 }
 
 type PackageVersionTag struct {
