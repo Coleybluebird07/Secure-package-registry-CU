@@ -29,11 +29,7 @@
   let loading = true;
   let error = "";
   let activeTab: DetailTab = "Read Me";
-
   let publishedAt = "Unknown";
-  let dependentsCount = "3.4k";
-  let dependenciesCount = "124";
-  let versionsCount = "18";
 
   function trustColor(score: number): string {
     if (score >= 90) return "#16a34a";
@@ -67,36 +63,17 @@
         ];
 
       case "Dependents":
-        return [
-          "Projects depending on this package:",
-          "",
-          "• analytics-service",
-          "• gateway-ui",
-          "• package-audit-worker",
-          "• internal-build-tools",
-          "",
-          `Estimated dependents: ${dependentsCount}`,
-        ];
+        return ["Dependents data not available yet."];
 
       case "Dependencies":
-        return [
-          "Direct dependencies:",
-          "",
-          ...selectedPackage.tags.map(
-            (tag) => `• ${tag.label}: ${decodeTagValue(tag.data)}`,
-          ),
-          "",
-          `Total dependencies: ${dependenciesCount}`,
-        ];
+        return selectedPackage.tags.length > 0
+          ? selectedPackage.tags.map(
+              (tag) => `• ${tag.label}: ${decodeTagValue(tag.data)}`,
+            )
+          : ["No dependency data available."];
 
       case "Versions":
-        return [
-          "Available versions:",
-          "",
-          `• ${selectedPackage.version}${selectedPackage.latest ? " (latest)" : ""}`,
-          "",
-          `Total versions: ${versionsCount}`,
-        ];
+        return ["Version history not available yet."];
 
       default:
         return [];
@@ -122,12 +99,17 @@
         throw new Error("Missing ecosystem or version in URL.");
       }
 
-      selectedPackage = await searchAPI.getVersion(
-        ecosystem,
-        identifier,
-        version,
+      const safeIdentifier = encodeURIComponent(identifier);
+
+      const response = await fetch(
+        `/api/v1/svc/packages/${ecosystem}/${safeIdentifier}/${version}`,
       );
-      publishedAt = "Recently";
+
+      if (!response.ok) {
+        throw new Error("Failed to fetch package details.");
+      }
+
+      selectedPackage = await response.json();
       activeTab = "Read Me";
     } catch (err) {
       error =
@@ -199,7 +181,7 @@
               class="tab-button"
               class:active-tab={activeTab === "Dependents"}
               type="button"
-              on:click={() => setActiveTab("Dependents")}
+              onclick={() => setActiveTab("Dependents")}
             >
               Dependents
             </button>
@@ -217,7 +199,7 @@
               class="tab-button"
               class:active-tab={activeTab === "Versions"}
               type="button"
-              on:click={() => setActiveTab("Versions")}
+              onclick={() => setActiveTab("Versions")}
             >
               Versions
             </button>
@@ -259,9 +241,9 @@
             <div class="link-list">
               <div class="link-row">
                 <span class="label">Install</span>
-                <span class="value mono"
-                  >npm i {selectedPackage.identifier}</span
-                >
+                <span class="value mono">
+                  npm i {selectedPackage.identifier}
+                </span>
               </div>
 
               <div class="link-row">
@@ -322,6 +304,7 @@
     flex-direction: column;
     gap: 1rem;
   }
+
   .hero-left {
     display: flex;
     flex-direction: column;
