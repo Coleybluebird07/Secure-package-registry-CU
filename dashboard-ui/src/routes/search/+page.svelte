@@ -1,19 +1,17 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
+  import { onMount } from "svelte";
   import { searchAPI } from "$lib/api";
   import type { PackageSummary, Ecosystem } from "$lib/types/api";
 
-  function trustColor(score: number): string {
-    if (score >= 90) return "trust-high";
-    if (score >= 70) return "trust-medium";
-    return "trust-low";
-  }
-
-  let searchQuery = $state("");
-  let selectedEcosystem = $state<"" | Ecosystem>("");
   let searchResults = $state<PackageSummary[]>([]);
   let loading = $state(false);
   let error = $state("");
   let hasSearched = $state(false);
+
+  let currentQuery = $state("");
+  let currentEcosystem = $state<"" | Ecosystem>("");
 
   const ecosystems = [
     { label: "All Ecosystems", value: "" as const },
@@ -23,9 +21,15 @@
     { label: "PyPI", value: "pypi" as const },
   ];
 
+  function trustColor(score: number): string {
+    if (score >= 90) return "trust-high";
+    if (score >= 70) return "trust-medium";
+    return "trust-low";
+  }
+
   const filteredResults = $derived(
     searchResults.filter((pkg) => {
-      const query = searchQuery.trim().toLowerCase();
+      const query = currentQuery.trim().toLowerCase();
 
       const matchesQuery =
         !query ||
@@ -34,17 +38,23 @@
         (pkg.tags ?? []).some((tag) => tag.toLowerCase().includes(query));
 
       const matchesEcosystem =
-        !selectedEcosystem || pkg.ecosystem === selectedEcosystem;
+        !currentEcosystem || pkg.ecosystem === currentEcosystem;
 
       return matchesQuery && matchesEcosystem;
     }),
   );
 
-  async function searchPackages() {
-    if (!searchQuery.trim() && !selectedEcosystem) {
-      error = "Please enter a search term or select an ecosystem.";
+  async function loadSearchFromUrl() {
+    const query = page.url.searchParams.get("q")?.trim() ?? "";
+    const ecosystemParam = page.url.searchParams.get("ecosystem") ?? "";
+
+    currentQuery = query;
+    currentEcosystem = ecosystemParam as "" | Ecosystem;
+
+    if (!query && !ecosystemParam) {
       hasSearched = false;
       searchResults = [];
+      error = "";
       return;
     }
 
@@ -53,12 +63,18 @@
     hasSearched = true;
 
     try {
-      const data = await searchAPI.search(
-        searchQuery.trim(),
-        selectedEcosystem || undefined,
-      );
-
+      const data = await searchAPI.search(query, ecosystemParam || undefined);
       searchResults = data.items ?? [];
+
+      if ((data.items ?? []).length === 0) {
+        if (query && ecosystemParam) {
+          error = `No packages found for "${query}" in ${ecosystemParam}.`;
+        } else if (query) {
+          error = `No packages found for "${query}".`;
+        } else if (ecosystemParam) {
+          error = `No packages found in ${ecosystemParam}.`;
+        }
+      }
     } catch {
       error = "Failed to search packages. Please try again.";
       searchResults = [];
@@ -67,11 +83,30 @@
     }
   }
 
-  function handleKeydown(event: KeyboardEvent) {
-    if (event.key === "Enter") {
-      searchPackages();
+  async function handleEcosystemChange(event: Event) {
+    const value = (event.currentTarget as HTMLSelectElement).value as
+      | ""
+      | Ecosystem;
+
+    currentEcosystem = value;
+
+    const params = new URLSearchParams();
+
+    if (currentQuery.trim()) {
+      params.set("q", currentQuery.trim());
     }
+
+    if (value) {
+      params.set("ecosystem", value);
+    }
+
+    await goto(`/search?${params.toString()}`);
+    await loadSearchFromUrl();
   }
+
+  onMount(async () => {
+    await loadSearchFromUrl();
+  });
 </script>
 
 <main>
@@ -80,26 +115,34 @@
   {/if}
 
   <div class="search-card">
-    <div class="search-row">
-      <input
-        type="text"
-        bind:value={searchQuery}
-        on:keydown={handleKeydown}
-        placeholder="Search packages…"
-        class="search-input"
-      />
+    <div class="search-header">
+      <div>
+        <div class="search-summary-title">Search results</div>
 
-      <select bind:value={selectedEcosystem} class="eco-select">
-        {#each ecosystems as ecosystem}
-          <option value={ecosystem.value}>{ecosystem.label}</option>
-        {/each}
-      </select>
+        <div class="search-summary-meta">
+          {#if currentQuery}
+            <span class="summary-pill">Query: {currentQuery}</span>
+          {/if}
 
-      <button on:click={searchPackages} disabled={loading} class="btn-search">
-        {loading ? "Searching…" : "Search"}
-      </button>
+          {#if currentEcosystem}
+            <span class="summary-pill">Ecosystem: {currentEcosystem}</span>
+          {/if}
+        </div>
+      </div>
 
-      <button class="btn-add" type="button">+ Add Package</button>
+      <div class="search-actions">
+        <select
+          bind:value={currentEcosystem}
+          class="eco-select"
+          onchange={handleEcosystemChange}
+        >
+          {#each ecosystems as ecosystem}
+            <option value={ecosystem.value}>{ecosystem.label}</option>
+          {/each}
+        </select>
+
+        <button class="btn-add" type="button">+ Add Package</button>
+      </div>
     </div>
 
     {#if hasSearched && !loading}
@@ -114,7 +157,7 @@
   {#if loading}
     <div class="state-msg">Searching…</div>
   {:else if hasSearched && filteredResults.length === 0}
-    <div class="state-msg">No packages matched your query.</div>
+    <div class="state-msg">No packages matched your search.</div>
   {:else if filteredResults.length > 0}
     <ul class="cards">
       {#each filteredResults as pkg}
@@ -167,6 +210,8 @@
         </li>
       {/each}
     </ul>
+  {:else}
+    <div class="state-msg">Use the search bar above to find packages.</div>
   {/if}
 </main>
 
@@ -188,16 +233,50 @@
 
   .search-card {
     margin-bottom: 1rem;
+    padding: 1rem 1.1rem;
+    border-radius: 14px;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
   }
 
-  .search-row {
-    display: grid;
-    grid-template-columns: 1fr 180px auto auto;
+  .search-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .search-summary-title {
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    margin-bottom: 0.6rem;
+  }
+
+  .search-summary-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .summary-pill {
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  .search-actions {
+    display: flex;
     gap: 0.625rem;
     align-items: center;
+    flex-wrap: wrap;
   }
 
-  .search-input,
   .eco-select {
     padding: 0.625rem 0.875rem;
     font-size: 0.93rem;
@@ -209,16 +288,10 @@
     transition: border-color 0.2s;
   }
 
-  .search-input::placeholder {
-    color: var(--text-secondary);
-  }
-
-  .search-input:focus,
   .eco-select:focus {
     border-color: var(--accent);
   }
 
-  .btn-search,
   .btn-add {
     padding: 0.625rem 1rem;
     font-size: 0.9rem;
@@ -226,25 +299,6 @@
     border-radius: 10px;
     cursor: pointer;
     white-space: nowrap;
-  }
-
-  .btn-search {
-    border: 1px solid var(--accent);
-    background: var(--accent);
-    color: white;
-  }
-
-  .btn-search:hover:not(:disabled) {
-    background: var(--accent-hover);
-    border-color: var(--accent-hover);
-  }
-
-  .btn-search:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .btn-add {
     border: 1px solid var(--accent);
     background: transparent;
     color: var(--accent);
@@ -419,8 +473,15 @@
   }
 
   @media (max-width: 640px) {
-    .search-row {
-      grid-template-columns: 1fr;
+    .search-header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .search-actions {
+      width: 100%;
+      flex-direction: column;
+      align-items: stretch;
     }
   }
 </style>
