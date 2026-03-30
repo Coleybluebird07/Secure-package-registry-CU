@@ -19,10 +19,7 @@
     <a href="{PUBLIC_HOME_BASE_URL}/pricing" class="nav-link">Pricing</a>
   </div>
   <div class="header-middle">
-    <form class="search-bar" method="get" action="/search">
-      <input type="text" name="searchbar" placeholder="Search Packages..." />
-      <button type="submit" class="search-button"> Search </button>
-    </form>
+    <a href="/search" class="nav-link">Search</a>
   </div>
   {#if isLoggedIn}
     <div class="header-right">
@@ -54,51 +51,6 @@
     border-bottom: 1px solid var(--border);
     z-index: 100;
     backdrop-filter: blur(10px);
-  }
-
-  .search-button {
-    border-top-right-radius: 6px;
-    border-bottom-right-radius: 6px;
-    background: var(--accent);
-    color: var(--bg-primary);
-    text-decoration: none;
-    padding: 0.5rem 1.75rem;
-    font-size: 0.95rem;
-    font-weight: 500;
-    transition: background 0.2s;
-    font-size: 0.875rem;
-    font-weight: 500;
-    transition: color 0.3s;
-  }
-
-  .search-bar {
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    margin-left: 2rem;
-    margin-right: 2rem;
-  }
-
-  .search-bar input {
-    padding: 0.5rem;
-    font-size: 0.95rem;
-    font-weight: 500;
-    transition: background 0.2s;
-    width: 75%;
-    color: var(--text-secondary);
-    background: var(--bg-primary);
-    accent-color: var(--text-secondary);
-    border-top-left-radius: 6px;
-    border-bottom-left-radius: 6px;
-    border-right: none;
-  }
-
-  .search-bar input::placeholder {
-    color: var(--text-secondary);
-  }
-
-  .search-bar input:focus {
-    outline: none;
   }
 
   .navbar-button {
