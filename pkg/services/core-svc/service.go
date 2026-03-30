@@ -13,11 +13,15 @@ import (
 
 	"git.duti.dev/secure-package-registry/internal/gen/coredb"
 	"git.duti.dev/secure-package-registry/internal/messages"
+	"git.duti.dev/secure-package-registry/pkg/gitea"
 	"git.duti.dev/secure-package-registry/pkg/logger"
 	sprminio "git.duti.dev/secure-package-registry/pkg/minio"
+	"git.duti.dev/secure-package-registry/pkg/npm"
+	ossrebuild "git.duti.dev/secure-package-registry/pkg/oss-rebuild"
 	"git.duti.dev/secure-package-registry/pkg/pkgdb"
 	"git.duti.dev/secure-package-registry/pkg/services"
 	"git.duti.dev/secure-package-registry/pkg/services/core-svc/server"
+	"git.duti.dev/secure-package-registry/pkg/verification"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-amqp/v3/pkg/amqp"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -90,21 +94,6 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("subscribing to collection completions: %w", err)
 	}
 
-	// Run consumers in separate goroutines; report fatal errors via channels.
-	updatedErr := make(chan error, 1)
-	go func() {
-		if err := consumePackageUpdated(ctx, queries, publisher, updatedCh); err != nil {
-			updatedErr <- err
-		}
-	}()
-
-	completedErr := make(chan error, 1)
-	go func() {
-		if err := consumeCollectionCompleted(ctx, queries, completedCh); err != nil {
-			completedErr <- err
-		}
-	}()
-
 	// Create MinIO client for admin artifact downloads.
 	minioCfg := deps.Config.MinIO
 	minioClient, err := sprminio.NewClient(ctx, sprminio.Config{
@@ -118,12 +107,47 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("creating minio client: %w", err)
 	}
 
+	// Create npm and OSS rebuild clients for verification.
+	npmClient := npm.NewClient(deps.Config.NPM)
+	ossClient := ossrebuild.NewClient(deps.Config.OSSRebuild)
+	verifier := verification.NewService(queries, npmClient, ossClient)
+
+	// Load the Gitea config from Valkey for the registry account.
+	giteaConfig, err := deps.Valkey.GetGiteaConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("loading gitea config from valkey: %w", err)
+	}
+	giteaClient := gitea.NewClient(giteaConfig)
+	registryAccount, err := giteaClient.NpmRegistry("registry")
+	if err != nil {
+		return fmt.Errorf("creating gitea registry account client: %w", err)
+	}
+
+	// Run consumers in separate goroutines; report fatal errors via channels.
+	updatedErr := make(chan error, 1)
+	go func() {
+		if err := consumePackageUpdated(ctx, queries, publisher, verifier, updatedCh); err != nil {
+			updatedErr <- err
+		}
+	}()
+
+	completedErr := make(chan error, 1)
+	go func() {
+		if err := consumeCollectionCompleted(ctx, queries, completedCh); err != nil {
+			completedErr <- err
+		}
+	}()
+
 	externalServer := server.NewExternal("0.0.0.0:"+deps.Config.CoreSvc.ExternalPort, db, server.AdminDeps{
 		Querier:   queries,
 		Publisher: publisher,
 		MinIO:     minioClient,
+	}, verifier)
+	internalServer := server.NewInternal("0.0.0.0:"+deps.Config.CoreSvc.InternalPort, server.InternalDeps{
+		Querier:         queries,
+		Publisher:       publisher,
+		RegistryAccount: registryAccount,
 	})
-	internalServer := server.NewInternal("0.0.0.0:"+deps.Config.CoreSvc.InternalPort, queries, publisher)
 
 	externalErrCh := externalServer.Start()
 	internalErrCh := internalServer.Start()
@@ -167,6 +191,7 @@ func consumePackageUpdated(
 	ctx context.Context,
 	queries *coredb.Queries,
 	publisher message.Publisher,
+	verifier *verification.Service,
 	messagesCh <-chan *message.Message,
 ) error {
 	for {
@@ -179,7 +204,7 @@ func consumePackageUpdated(
 				log.Info().Msg("Package-updated subscription closed")
 				return nil
 			}
-			if err := handlePackageUpdated(ctx, queries, publisher, msg); err != nil {
+			if err := handlePackageUpdated(ctx, queries, publisher, verifier, msg); err != nil {
 				log.Error().Err(err).Msg("Failed to handle package-updated message")
 				msg.Nack()
 				continue
@@ -193,6 +218,7 @@ func handlePackageUpdated(
 	ctx context.Context,
 	queries *coredb.Queries,
 	publisher message.Publisher,
+	verifier *verification.Service,
 	msg *message.Message,
 ) error {
 	var upd messages.PackageUpdated
@@ -233,6 +259,14 @@ func handlePackageUpdated(
 	})
 	if err != nil {
 		return fmt.Errorf("updating package latest version: %w", err)
+	}
+
+	// Auto-verify: check upstream attestation and OSS rebuild status.
+	// Best-effort — errors are logged but don't block ingestion.
+	if _, err := verifier.CheckAndTag(ctx, upd.Ecosystem, upd.Identifier, upd.Version); err != nil {
+		l.Warn().Err(err).Msg("Auto-verification failed (non-fatal)")
+	} else {
+		l.Info().Msg("Auto-verification completed")
 	}
 
 	// Dedup: skip if a collection task is already pending or running.

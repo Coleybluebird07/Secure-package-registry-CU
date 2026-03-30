@@ -133,3 +133,11 @@ export interface PackageVersionDetail {
 		data: string; // base64 encoded JSON
 	}>;
 }
+
+export interface VerifyResponse {
+	ecosystem: string;
+	identifier: string;
+	version: string;
+	upstream_attestation: boolean;
+	oss_rebuild: boolean;
+}

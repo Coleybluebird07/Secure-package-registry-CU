@@ -10,6 +10,7 @@ import type {
 	SearchResult,
 	TriggerScanRequest,
 	TriggerScanResponse,
+	VerifyResponse,
 } from "$lib/types/api.js";
 
 const API_BASE = "/api/v1";
@@ -150,6 +151,18 @@ export const searchAPI = {
 			: `${API_BASE}/svc/packages`;
 
 		return fetchJSON(url);
+	},
+
+	verify: (
+		ecosystem: string,
+		identifier: string,
+		version: string,
+	): Promise<VerifyResponse> => {
+		const safeIdentifier = encodeURIComponent(identifier);
+		return fetchJSON(
+			`${API_BASE}/svc/packages/${ecosystem}/${safeIdentifier}/${version}/verify`,
+			{ method: "POST" },
+		);
 	},
 };
 

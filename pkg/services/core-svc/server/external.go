@@ -8,6 +8,7 @@ import (
 	sprminio "git.duti.dev/secure-package-registry/pkg/minio"
 	"git.duti.dev/secure-package-registry/pkg/pkgdb"
 	"git.duti.dev/secure-package-registry/pkg/services/core-svc/handlers/external"
+	"git.duti.dev/secure-package-registry/pkg/verification"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -21,7 +22,7 @@ type AdminDeps struct {
 }
 
 // NewExternal creates the external API server with public and admin routes.
-func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps) *Server {
+func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps, verifier *verification.Service) *Server {
 	r := chi.NewRouter()
 
 	// Base middleware stack
@@ -38,8 +39,10 @@ func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps) *Server {
 	})
 
 	// API routes
-	r.Route("/api/v1/svc", func(r chi.Router) {
-		r.Mount("/packages", external.NewPackageHandler(db))
+	r.Route("/api/v1/svc/packages", func(r chi.Router) {
+		r.Mount("/", external.NewPackageHandler(db))
+		vh := external.NewVerificationHandler(verifier)
+		r.Post("/{ecosystem}/{identifier}/{version}/verify", vh.Verify)
 	})
 
 	// Admin routes
