@@ -1,7 +1,6 @@
 <script lang="ts">
   import { authClient } from "$lib/client";
   import { PUBLIC_HOME_BASE_URL } from "$env/static/public";
-
   let activeTab: "login" | "register" = $state("login");
 
   // Login state
@@ -19,6 +18,21 @@
   let registerError = $state("");
   let registerLoading = $state(false);
   let registerSuccess = $state(false);
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  function validateRegister(): string | null {
+    if (!emailRegex.test(registerEmail))
+      return "Please enter a valid email address";
+    if (registerPassword.length < 8)
+      return "Password must be at least 8 characters";
+    if (!/[A-Z]/.test(registerPassword))
+      return "Password must contain at least one uppercase letter";
+    if (!/[0-9]/.test(registerPassword))
+      return "Password must contain at least one number";
+    if (registerPassword !== confirmPassword) return "Passwords do not match";
+    return null;
+  }
 
   async function handleLogin(e: Event) {
     e.preventDefault();
@@ -40,8 +54,9 @@
 
   async function handleRegister(e: Event) {
     e.preventDefault();
-    if (registerPassword !== confirmPassword) {
-      registerError = "Passwords do not match";
+    const validationError = validateRegister();
+    if (validationError) {
+      registerError = validationError;
       return;
     }
     registerLoading = true;
@@ -83,14 +98,28 @@
         </button>
       </div>
 
-      {#if activeTab === "login"}
+      {#if registerSuccess}
+        <div class="form-section verify-section">
+          <div class="verify-icon">✉</div>
+          <h1>Check your email</h1>
+          <p class="subtitle">
+            We sent a verification link to <strong>{registerEmail}</strong>.
+            Click it to activate your account before signing in.
+          </p>
+          <button
+            class="submit-button"
+            onclick={() => {
+              registerSuccess = false;
+              activeTab = "login";
+            }}
+          >
+            Back to Sign In
+          </button>
+        </div>
+      {:else if activeTab === "login"}
         <div class="form-section">
           <h1>Welcome back</h1>
           <p class="subtitle">Access your secure package registry</p>
-
-          {#if registerSuccess}
-            <p class="success-message">Account created! Please sign in.</p>
-          {/if}
 
           <form onsubmit={handleLogin}>
             <div class="form-group">
@@ -187,7 +216,9 @@
                 required
                 bind:value={registerPassword}
               />
-              <span class="helper-text">At least 8 characters</span>
+              <span class="helper-text"
+                >At least 8 characters, one uppercase letter, one number</span
+              >
             </div>
 
             <div class="form-group">

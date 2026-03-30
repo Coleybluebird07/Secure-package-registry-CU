@@ -2,8 +2,15 @@ import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
 import { admin, organization } from "better-auth/plugins";
 import { sveltekitCookies } from "better-auth/svelte-kit";
+import nodemailer from "nodemailer";
 import { Pool } from "pg";
 import { getRequestEvent } from "$app/server";
+
+const transporter = nodemailer.createTransport({
+	host: process.env.SMTP_HOST ?? "mailpit",
+	port: Number(process.env.SMTP_PORT ?? 1025),
+	secure: false,
+});
 
 export const auth = betterAuth({
 	database: new Pool({
@@ -19,6 +26,21 @@ export const auth = betterAuth({
 	emailAndPassword: {
 		autoSignIn: false,
 		enabled: true,
+		requireEmailVerification: true,
+	},
+
+	emailVerification: {
+		callbackURL: "/verified",
+		sendVerificationEmail: async ({ user, url }) => {
+			const verificationUrl = new URL(url);
+			verificationUrl.searchParams.set("callbackURL", "/verified");
+			await transporter.sendMail({
+				from: "noreply@spr.local",
+				html: `<p>Click the link below to verify your email address:</p><p><a href="${verificationUrl.toString()}">${verificationUrl.toString()}</a></p>`,
+				subject: "Verify your email address",
+				to: user.email,
+			});
+		},
 	},
 
 	plugins: [
