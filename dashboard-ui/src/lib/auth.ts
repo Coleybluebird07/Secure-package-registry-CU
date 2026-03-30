@@ -1,6 +1,6 @@
 import { apiKey } from "@better-auth/api-key";
 import { betterAuth } from "better-auth";
-import { organization } from "better-auth/plugins";
+import { admin, organization } from "better-auth/plugins";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { Pool } from "pg";
 import { getRequestEvent } from "$app/server";
@@ -22,6 +22,7 @@ export const auth = betterAuth({
 	},
 
 	plugins: [
+		admin(),
 		organization(),
 		apiKey(),
 		sveltekitCookies(getRequestEvent), // make sure this is the last plugin in the array

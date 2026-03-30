@@ -11,6 +11,10 @@ alter table "user" add column if not exists "emailVerified" boolean not null def
 alter table "user" add column if not exists "image" text;
 alter table "user" add column if not exists "createdAt" timestamptz default CURRENT_TIMESTAMP not null;
 alter table "user" add column if not exists "updatedAt" timestamptz default CURRENT_TIMESTAMP not null;
+alter table "user" add column if not exists "role" text not null default 'user';
+alter table "user" add column if not exists "banned" boolean default false;
+alter table "user" add column if not exists "banReason" text;
+alter table "user" add column if not exists "banExpires" timestamptz;
 
 
 create table "session" ("id" text not null primary key, "expiresAt" timestamptz not null, "token" text not null unique, "createdAt" timestamptz default CURRENT_TIMESTAMP not null, "updatedAt" timestamptz not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade, "activeOrganizationId" text);
