@@ -8,11 +8,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"git.duti.dev/secure-package-registry/internal/gen/coredb"
 	"git.duti.dev/secure-package-registry/internal/messages"
+	"git.duti.dev/secure-package-registry/pkg/behavior"
 	"git.duti.dev/secure-package-registry/pkg/gitea"
 	"git.duti.dev/secure-package-registry/pkg/logger"
 	sprminio "git.duti.dev/secure-package-registry/pkg/minio"
@@ -133,7 +136,7 @@ func Start(ctx context.Context, deps *services.Deps) error {
 
 	completedErr := make(chan error, 1)
 	go func() {
-		if err := consumeCollectionCompleted(ctx, queries, completedCh); err != nil {
+		if err := consumeCollectionCompleted(ctx, queries, minioClient, completedCh); err != nil {
 			completedErr <- err
 		}
 	}()
@@ -324,6 +327,7 @@ func handlePackageUpdated(
 func consumeCollectionCompleted(
 	ctx context.Context,
 	queries *coredb.Queries,
+	minio *sprminio.Client,
 	messagesCh <-chan *message.Message,
 ) error {
 	for {
@@ -336,7 +340,7 @@ func consumeCollectionCompleted(
 				log.Info().Msg("Collection-completed subscription closed")
 				return nil
 			}
-			if err := handleCollectionCompleted(ctx, queries, msg); err != nil {
+			if err := handleCollectionCompleted(ctx, queries, minio, msg); err != nil {
 				log.Error().Err(err).Msg("Failed to handle collection-completed message")
 				msg.Nack()
 				continue
@@ -349,6 +353,7 @@ func consumeCollectionCompleted(
 func handleCollectionCompleted(
 	ctx context.Context,
 	queries *coredb.Queries,
+	minio *sprminio.Client,
 	msg *message.Message,
 ) error {
 	var completed messages.CollectionCompleted
@@ -376,6 +381,13 @@ func handleCollectionCompleted(
 			Str("bucket", completed.ArtifactBucket).
 			Str("key", completed.ArtifactKey).
 			Msg("Collection task succeeded")
+
+		// Best-effort: evaluate the deduped behavior tree and set the
+		// behavior_passed tag. An empty deduped tree (no anomalous behaviors
+		// after baseline subtraction) means the package passed.
+		if err := evaluateBehavior(ctx, queries, minio, completed); err != nil {
+			l.Warn().Err(err).Msg("Failed to evaluate behavioral analysis result")
+		}
 	} else {
 		err := queries.UpdateCollectionTaskFailed(ctx, coredb.UpdateCollectionTaskFailedParams{
 			ID:            completed.TaskID,
@@ -388,6 +400,71 @@ func handleCollectionCompleted(
 			Str("reason", completed.FailureReason).
 			Msg("Collection task failed")
 	}
+
+	return nil
+}
+
+// evaluateBehavior downloads the deduped behavior tree from MinIO and sets the
+// behavior_passed tag on the package version. An empty tree (no anomalous
+// behaviors remaining after baseline subtraction) is treated as passed.
+func evaluateBehavior(
+	ctx context.Context,
+	queries *coredb.Queries,
+	minio *sprminio.Client,
+	completed messages.CollectionCompleted,
+) error {
+	// Derive the deduped JSON key from the raw artifact key.
+	// Raw:     behavior/{eco}/{pkg}/{ver}/{src}/behavior.jsonl
+	// Deduped: behavior/{eco}/{pkg}/{ver}/{src}/behavior-deduped.json
+	dedupedKey := strings.TrimSuffix(completed.ArtifactKey, "behavior.jsonl") + "behavior-deduped.json"
+
+	data, err := minio.GetObject(ctx, dedupedKey)
+	if err != nil {
+		return fmt.Errorf("downloading deduped tree %q: %w", dedupedKey, err)
+	}
+
+	var tree behavior.ProcessTree
+	if err := json.Unmarshal(data, &tree); err != nil {
+		return fmt.Errorf("unmarshalling deduped tree: %w", err)
+	}
+
+	passed := tree.IsEmpty()
+
+	// Look up the package version ID.
+	pvID, err := queries.GetPackageVersionID(ctx, coredb.GetPackageVersionIDParams{
+		Ecosystem:  coredb.Ecosystem(completed.Ecosystem),
+		Identifier: completed.Identifier,
+		Version:    completed.Version,
+	})
+	if err != nil {
+		return fmt.Errorf("looking up package version: %w", err)
+	}
+
+	// Look up the tag type and upsert.
+	tagTypeID, err := queries.GetTagTypeByLabel(ctx, "behavior_passed")
+	if err != nil {
+		return fmt.Errorf("looking up behavior_passed tag type: %w", err)
+	}
+
+	val := []byte(`false`)
+	if passed {
+		val = []byte(`true`)
+	}
+
+	if err := queries.InsertPackageTag(ctx, coredb.InsertPackageTagParams{
+		PackageVersion: pvID,
+		TagType:        tagTypeID,
+		Value:          val,
+	}); err != nil {
+		return fmt.Errorf("upserting behavior_passed tag: %w", err)
+	}
+
+	log.Info().
+		Str("ecosystem", completed.Ecosystem).
+		Str("package", completed.Identifier).
+		Str("version", completed.Version).
+		Bool("passed", passed).
+		Msg("Behavioral analysis evaluated")
 
 	return nil
 }
