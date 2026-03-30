@@ -44,3 +44,12 @@ create index "member_userId_idx" on "member" ("userId");
 create index "invitation_organizationId_idx" on "invitation" ("organizationId");
 
 create index "invitation_email_idx" on "invitation" ("email");
+
+-- Seed default admin user (password: Admin1234!)
+INSERT INTO "user" ("id", "name", "email", "emailVerified", "role", "createdAt", "updatedAt")
+VALUES ('seed-admin-1', 'Admin', 'admin@admin.com', TRUE, 'admin', NOW(), NOW())
+ON CONFLICT ("email") DO NOTHING;
+
+INSERT INTO "account" ("id", "accountId", "providerId", "userId", "password", "createdAt", "updatedAt")
+VALUES ('seed-admin-account-1', 'admin@admin.com', 'credential', 'seed-admin-1', '59a0cd2dffa80a11bcfe29d704231915:f01cc43f77d2ce7e7b4bd5657c12c24de28f164c849ce26471b218b0ba82a25524299037934968fab1be8fc65ed268d953344f8ceef9ba2c46f4fa32c0f0eba3', NOW(), NOW())
+ON CONFLICT ("id") DO NOTHING;

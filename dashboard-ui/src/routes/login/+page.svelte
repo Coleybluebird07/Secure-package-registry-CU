@@ -100,7 +100,6 @@
 
       {#if registerSuccess}
         <div class="form-section verify-section">
-          <div class="verify-icon">✉</div>
           <h1>Check your email</h1>
           <p class="subtitle">
             We sent a verification link to <strong>{registerEmail}</strong>.
@@ -485,6 +484,16 @@
 
   .switch-link:hover {
     color: var(--accent-hover);
+  }
+
+  .verify-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .verify-section .submit-button {
+    width: 100%;
   }
 
   @media (max-width: 520px) {
