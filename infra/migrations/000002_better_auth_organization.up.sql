@@ -5,17 +5,12 @@ CREATE TABLE IF NOT EXISTS "user" (
     "id" text NOT NULL PRIMARY KEY
 );
 
-alter table "user" add column "name" text not null;
-
-alter table "user" add column "email" text not null unique;
-
-alter table "user" add column "emailVerified" boolean not null;
-
-alter table "user" add column "image" text;
-
-alter table "user" add column "createdAt" timestamptz default CURRENT_TIMESTAMP not null;
-
-alter table "user" add column "updatedAt" timestamptz default CURRENT_TIMESTAMP not null;
+alter table "user" add column if not exists "name" text not null default '';
+alter table "user" add column if not exists "email" text not null unique default '';
+alter table "user" add column if not exists "emailVerified" boolean not null default false;
+alter table "user" add column if not exists "image" text;
+alter table "user" add column if not exists "createdAt" timestamptz default CURRENT_TIMESTAMP not null;
+alter table "user" add column if not exists "updatedAt" timestamptz default CURRENT_TIMESTAMP not null;
 
 
 create table "session" ("id" text not null primary key, "expiresAt" timestamptz not null, "token" text not null unique, "createdAt" timestamptz default CURRENT_TIMESTAMP not null, "updatedAt" timestamptz not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade, "activeOrganizationId" text);

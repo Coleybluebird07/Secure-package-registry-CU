@@ -236,6 +236,7 @@ services:
       - POSTGRES_DB=core
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL}
+      - BETTER_AUTH_API_KEY=${BETTER_AUTH_API_KEY}
       - TRUSTED_ORIGINS=${TRUSTED_ORIGINS}
     restart: unless-stopped
 
