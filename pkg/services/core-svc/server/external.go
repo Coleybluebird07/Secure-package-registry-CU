@@ -21,8 +21,14 @@ type AdminDeps struct {
 	MinIO     *sprminio.Client
 }
 
-// NewExternal creates the external API server with public and admin routes.
-func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps, verifier *verification.Service) *Server {
+// ProjectDeps bundles the dependencies needed by project API handlers.
+type ProjectDeps struct {
+	Querier   coredb.Querier
+	Publisher message.Publisher
+}
+
+// NewExternal creates the external API server with public, admin, and project routes.
+func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps, project ProjectDeps, verifier *verification.Service) *Server {
 	r := chi.NewRouter()
 
 	// Base middleware stack
@@ -47,6 +53,12 @@ func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps, verifier *verif
 
 	// Admin routes
 	r.Mount("/api/v1/admin", external.NewAdminHandler(admin.Querier, admin.Publisher, admin.MinIO))
+
+	// Project routes (authenticated via API key)
+	r.Route("/api/v1/projects", func(r chi.Router) {
+		r.Use(external.AuthMiddleware(project.Querier))
+		r.Mount("/", external.NewProjectHandler(project.Querier, project.Publisher, verifier))
+	})
 
 	return New("external", addr, r)
 }
