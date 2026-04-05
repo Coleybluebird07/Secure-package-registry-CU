@@ -6,12 +6,22 @@
 
   const user = $derived(page.data.user);
 
-  let dialog: GenerateKeyDialog;
+  let dialog = $state<GenerateAPIKeyDialog | null>(null);
 
   let activeTab: "profile" | "APIKeys" = $state("profile");
 
   function handleGenerateKey(tokenName: string) {
-    console.log("Generate new API key:", tokenName);
+    const fakeKey = "fake_token_" + crypto.randomUUID().replace(/-/g, "");
+    dialog!.openWithKey(fakeKey);
+  }
+
+  function handleRevokeKey(keyName: string) {
+    alert("Revoked key: " + keyName);
+  }
+
+  function handleRegenerateKey(keyName: string) {
+    const fakeKey = "fake_token_" + crypto.randomUUID().replace(/-/g, "");
+    dialog!.openWithKey(fakeKey);
   }
 </script>
 
@@ -72,20 +82,22 @@
             preview="sk-****-1234"
             createdAt="2024-01-15"
             lastUsed="2024-06-10"
-            onRevoke={() => alert("Revoke Default Key")}
+            onRevoke={handleRevokeKey}
+            onRegen={handleRegenerateKey}
           />
           <ApiKeySlide
             name="Secondary Key"
             preview="sk-****-5678"
             createdAt="2024-02-20"
             lastUsed="Never"
-            onRevoke={() => alert("Revoke Secondary Key")}
+            onRevoke={handleRevokeKey}
+            onRegen={handleRegenerateKey}
           />
         </div>
         <button
           class="keygen-button"
           type="button"
-          onclick={() => dialog.open()}
+          onclick={() => dialog!.open()}
         >
           + Generate new key
         </button>
@@ -93,7 +105,7 @@
         <GenerateAPIKeyDialog
           bind:this={dialog}
           onGenerate={handleGenerateKey}
-          onCancel={() => dialog.close()}
+          onCancel={() => dialog!.close()}
         />
       {/if}
     {/if}
@@ -158,7 +170,7 @@
 
   .profile-card {
     width: 100%;
-    max-width: 28rem;
+    max-width: 40rem;
     border-radius: 12px;
     border: 1px solid var(--card-border);
     background: var(--card-bg);

@@ -6,55 +6,107 @@
 
   let dialog: HTMLDialogElement;
   let keyName = $state("");
+  let revealedKey = $state<string | null>(null);
+  let copied = $state(false);
 
   export function open() {
     keyName = "";
+    revealedKey = null;
+    dialog.showModal();
+  }
+
+  export function openWithKey(key: string) {
+    keyName = "";
+    revealedKey = key;
     dialog.showModal();
   }
 
   export function close() {
+    revealedKey = null;
+    copied = false;
     dialog.close();
+  }
+
+  export function reveal(key: string) {
+    revealedKey = key;
   }
 
   function handleGenerate() {
     if (!keyName.trim()) return;
     onGenerate(keyName.trim());
-    close();
+  }
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(revealedKey!);
+    copied = true;
   }
 </script>
 
 <dialog bind:this={dialog} class="dialog">
   <div class="dialog-content">
-    <h2 class="dialog-title">Generate API key</h2>
-    <p class="dialog-desc">
-      Give your key a name so you can identify it later.
-    </p>
+    {#if revealedKey}
+      <h2 class="dialog-title">Your new API key</h2>
+      <div class="warn-box">Copy this key now — it won't be shown again.</div>
+      <div class="key-box">
+        <span class="key-box-label">API key</span>
+        <code class="key-text">{revealedKey}</code>
+        <div class="flex">
+          <button class="btn-copy" type="button" onclick={handleCopy}>
+            Copy
+          </button>
+          {#if copied}
+            <span class="clipboard-copy-alert">Copied to clipboard!</span>
+          {/if}
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn-cancel" type="button" onclick={close}>Done</button>
+      </div>
+    {:else}
+      <h2 class="dialog-title">Generate API key</h2>
+      <p class="dialog-desc">
+        Give your key a name so you can identify it later.
+      </p>
 
-    <label class="field-label" for="key-name">Key name</label>
-    <input
-      id="key-name"
-      class="key-input"
-      type="text"
-      placeholder="e.g. CI pipeline, local dev"
-      bind:value={keyName}
-    />
+      <label class="field-label" for="key-name">Key name</label>
+      <input
+        id="key-name"
+        class="key-input"
+        type="text"
+        placeholder="e.g. CI pipeline, local dev"
+        bind:value={keyName}
+      />
 
-    <div class="dialog-actions">
-      <button class="btn-cancel" type="button" onclick={onCancel}>Cancel</button
-      >
-      <button
-        class="btn-generate"
-        type="button"
-        disabled={!keyName.trim()}
-        onclick={handleGenerate}
-      >
-        Generate
-      </button>
-    </div>
+      <div class="dialog-actions">
+        <button class="btn-cancel" type="button" onclick={onCancel}
+          >Cancel</button
+        >
+        <button
+          class="btn-generate"
+          type="button"
+          disabled={!keyName.trim()}
+          onclick={handleGenerate}
+        >
+          Generate
+        </button>
+      </div>
+    {/if}
   </div>
 </dialog>
 
 <style>
+  .flex {
+    display: flex;
+  }
+
+  .clipboard-copy-alert {
+    padding: 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: transparent;
+  }
+
   dialog {
     border: 1px solid var(--border);
     border-radius: 1rem;
@@ -89,6 +141,56 @@
     margin-bottom: 1.25rem;
   }
 
+  .warn-box {
+    font-size: 0.875rem;
+    color: #92400e;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .key-box {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    border-radius: 0.5rem;
+    padding: 0.875rem 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .key-box-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #166534;
+  }
+
+  .key-text {
+    font-family: monospace;
+    font-size: 0.8125rem;
+    color: var(--text-primary);
+    word-break: break-all;
+  }
+
+  .btn-copy {
+    align-self: flex-start;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    cursor: pointer;
+  }
+
+  .btn-copy:hover {
+    background: var(--bg-secondary);
+  }
+
   .field-label {
     display: block;
     font-size: 0.875rem;
@@ -112,7 +214,6 @@
 
   .key-input:focus {
     border-color: var(--accent);
-    /* box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.15); */
   }
 
   .dialog-actions {
@@ -126,7 +227,6 @@
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-secondary);
-    /* background: transparent; */
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     cursor: pointer;
@@ -141,11 +241,9 @@
     border: none;
     border-radius: 0.5rem;
     cursor: pointer;
-    /* transition: opacity 0.15s; */
   }
 
   .btn-generate:disabled {
-    /* opacity: 0.4; */
     cursor: not-allowed;
   }
 </style>

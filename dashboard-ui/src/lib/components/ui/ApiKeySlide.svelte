@@ -1,25 +1,66 @@
 <script lang="ts">
-  let { name, preview, createdAt, lastUsed, onRevoke } = $props<{
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+
+  let { name, preview, createdAt, lastUsed, onRevoke, onRegen } = $props<{
     name: string;
     preview: string;
     createdAt: string;
     lastUsed: string;
-    onRevoke: () => void;
+    onRevoke: (name: string) => void;
+    onRegen: (name: string) => void;
   }>();
+
+  let revokeDialog: ConfirmDialog;
+  let regenDialog: ConfirmDialog;
 </script>
 
 <div class="key-row">
   <div class="key-info">
     <span class="key-name">{name}</span>
     <span class="key-meta">
-      Created {createdAt} · {lastUsed === "Never"
-        ? "never used"
-        : `last used ${lastUsed}`}
+      Created {createdAt}
+    </span>
+    <span class="key-meta">
+      {lastUsed === "Never" ? "never used" : `last used ${lastUsed}`}
     </span>
   </div>
+  <span class="key-preview">{preview}</span>
   <div class="key-right">
-    <span class="key-preview">{preview}</span>
-    <button class="btn-revoke" type="button" onclick={onRevoke}>Revoke</button>
+    <button
+      class="btn-revoke"
+      type="button"
+      onclick={() => revokeDialog.open()}
+    >
+      Revoke
+    </button>
+
+    <ConfirmDialog
+      bind:this={revokeDialog}
+      title={`Revoke ${name}?`}
+      description="This key will stop working immediately. This cannot be undone."
+      confirmLabel="Revoke"
+      onConfirm={() => {
+        revokeDialog.close();
+        onRevoke();
+      }}
+      onCancel={() => revokeDialog.close()}
+    />
+
+    <button class="btn-revoke" type="button" onclick={() => regenDialog.open()}>
+      Regenerate
+    </button>
+
+    <ConfirmDialog
+      bind:this={regenDialog}
+      title={`Regenerate ${name}?`}
+      description="This will revoke the current key and generate a new one. This cannot be undone."
+      confirmLabel="Regenerate"
+      onConfirm={() => {
+        regenDialog.close();
+        onRegen();
+      }}
+      onCancel={() => regenDialog.close()}
+    />
   </div>
 </div>
 
