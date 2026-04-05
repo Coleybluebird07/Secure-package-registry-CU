@@ -14,6 +14,7 @@
   let name = $state("");
   let registerEmail = $state("");
   let registerPassword = $state("");
+  let confirmPassword = $state("");
   let registerError = $state("");
   let registerLoading = $state(false);
 
@@ -38,6 +39,13 @@
 
   async function handleRegister(e: Event) {
     e.preventDefault();
+
+    if (registerPassword !== confirmPassword) {
+      registerError = "Passwords do not match";
+      registerLoading = false;
+      return;
+    }
+
     registerError = "";
     registerLoading = true;
 
@@ -48,6 +56,7 @@
     });
 
     if (authError) {
+      console.error("Sign up error:", authError);
       registerError = authError.message ?? "Sign up failed";
       registerLoading = false;
       return;
@@ -177,6 +186,21 @@
               type="password"
               bind:value={registerPassword}
               placeholder="At least 8 characters"
+              required
+              minlength="8"
+              class="form-input"
+            />
+          </div>
+
+          <div class="form-field">
+            <label class="form-label" for="confirm-password"
+              >Confirm Password</label
+            >
+            <input
+              id="confirm-password"
+              type="password"
+              bind:value={confirmPassword}
+              placeholder="Re-enter your password"
               required
               minlength="8"
               class="form-input"

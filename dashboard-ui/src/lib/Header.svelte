@@ -17,10 +17,10 @@
     <div class="logo">
       <a class="clear-a-stylings" href="{PUBLIC_HOME_BASE_URL}/">SPR</a>
     </div>
-  </div>
-  <div class="header-middle">
     <a href="/search" class="nav-link">Search</a>
   </div>
+  <!-- <div class="header-middle"> -->
+  <!-- </div> -->
   {#if user}
     <div class="header-right">
       <button class="theme-toggle" onclick={onToggleTheme}>
@@ -99,11 +99,11 @@
     gap: 0.75rem;
   }
 
-  .header-middle {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-  }
+  /* .header-middle { */
+  /*   flex: 1; */
+  /*   display: flex; */
+  /*   justify-content: center; */
+  /* } */
 
   .theme-toggle {
     background: var(--wb-bg-invert);

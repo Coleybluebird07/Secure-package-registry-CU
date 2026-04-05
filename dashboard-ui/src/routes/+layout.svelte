@@ -56,7 +56,9 @@
     --accent: #1d4ed8;
     --accent-hover: #1e40af;
     --border: #e5e7eb;
+    --border-stronger: #636363;
     --card-bg: #fff;
+    --card-bg-no-alpha: #fff;
     --card-border: #e5e7eb;
     /* wb = White Black */
     --wb-bg: white;
@@ -84,7 +86,9 @@
     --accent: #4fc3f7;
     --accent-hover: #51cf66;
     --border: #2a2a3e;
+    --border-stronger: #626262;
     --card-bg: rgba(26, 26, 46, 0.5);
+    --card-bg-no-alpha: rgba(26, 26, 46);
     --card-border: rgba(79, 195, 247, 0.2);
     --wb-bg: black;
     --wb-bg-invert: white;
