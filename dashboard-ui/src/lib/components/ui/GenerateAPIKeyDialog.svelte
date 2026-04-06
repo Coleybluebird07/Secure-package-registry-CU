@@ -1,6 +1,6 @@
 <script lang="ts">
   let { onGenerate, onCancel } = $props<{
-    onGenerate: (name: string) => void;
+    onGenerate: (name: string, expiryDays: number | null) => void;
     onCancel: () => void;
   }>();
 
@@ -8,16 +8,19 @@
   let keyName = $state("");
   let revealedKey = $state<string | null>(null);
   let copied = $state(false);
+  let expiryDays = $state<number | null>(30);
 
   export function open() {
     keyName = "";
     revealedKey = null;
+    expiryDays = 30;
     dialog.showModal();
   }
 
   export function openWithKey(key: string) {
     keyName = "";
     revealedKey = key;
+    expiryDays = 30;
     dialog.showModal();
   }
 
@@ -31,9 +34,9 @@
     revealedKey = key;
   }
 
-  function handleGenerate() {
+  function handleGenerate(expiryDays: number | null) {
     if (!keyName.trim()) return;
-    onGenerate(keyName.trim());
+    onGenerate(keyName.trim(), expiryDays);
   }
 
   async function handleCopy() {
@@ -77,6 +80,15 @@
         bind:value={keyName}
       />
 
+      <label class="field-label" for="expiry">Expiration</label>
+      <select id="expiry" class="key-input" bind:value={expiryDays}>
+        <option value={30}>30 days</option>
+        <option value={60}>60 days</option>
+        <option value={90}>90 days</option>
+        <option value={365}>1 year</option>
+        <option value={null}>Never</option>
+      </select>
+
       <div class="dialog-actions">
         <button class="btn-cancel" type="button" onclick={onCancel}
           >Cancel</button
@@ -85,7 +97,7 @@
           class="btn-generate"
           type="button"
           disabled={!keyName.trim()}
-          onclick={handleGenerate}
+          onclick={() => handleGenerate(expiryDays)}
         >
           Generate
         </button>

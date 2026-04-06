@@ -10,7 +10,7 @@
 
   let activeTab: "profile" | "APIKeys" = $state("profile");
 
-  function handleGenerateKey(tokenName: string) {
+  function handleGenerateKey(tokenName: string, expiryDays: number | null) {
     const fakeKey = "fake_token_" + crypto.randomUUID().replace(/-/g, "");
     dialog!.openWithKey(fakeKey);
   }
@@ -19,7 +19,7 @@
     alert("Revoked key: " + keyName);
   }
 
-  function handleRegenerateKey(keyName: string) {
+  function handleRegenerateKey(keyName: string, expiryDays: number | null) {
     const fakeKey = "fake_token_" + crypto.randomUUID().replace(/-/g, "");
     dialog!.openWithKey(fakeKey);
   }
@@ -44,71 +44,76 @@
       </button>
     </div>
 
-    {#if user}
-      {#if activeTab === "profile"}
-        <h1 class="profile-title">Profile</h1>
-        <div class="info-section">
-          <div class="info-row">
-            <span class="info-label">Name</span>
-            <span class="info-value">{user.name || "—"}</span>
+    <div class="tab-content">
+      {#if user}
+        {#if activeTab === "profile"}
+          <h1 class="profile-title">Profile</h1>
+          <div class="info-section">
+            <div class="info-row">
+              <span class="info-label">Name</span>
+              <span class="info-value">{user.name || "—"}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Email</span>
+              <span class="info-value">{user.email}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">Email Verified</span>
+              <span class="info-value">{user.emailVerified ? "Yes" : "No"}</span
+              >
+            </div>
+            <div class="info-row">
+              <span class="info-label">Member Since</span>
+              <span class="info-value">
+                {new Date(user.createdAt).toLocaleDateString()}
+              </span>
+            </div>
           </div>
-          <div class="info-row">
-            <span class="info-label">Email</span>
-            <span class="info-value">{user.email}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">Email Verified</span>
-            <span class="info-value">{user.emailVerified ? "Yes" : "No"}</span>
-          </div>
-          <div class="info-row">
-            <span class="info-label">Member Since</span>
-            <span class="info-value">
-              {new Date(user.createdAt).toLocaleDateString()}
-            </span>
-          </div>
-        </div>
 
-        <div class="actions">
-          <form method="POST" action="/logout" use:enhance>
-            <button type="submit" class="btn-logout">Log Out</button>
-          </form>
-        </div>
-      {:else if activeTab === "APIKeys"}
-        <h1 class="api-title">API Keys</h1>
-        <p>Generate/Manage API Keys, for Pulling Packages</p>
-        <div class="api-keys-list">
-          <ApiKeySlide
-            name="Default Key"
-            preview="sk-****-1234"
-            createdAt="2024-01-15"
-            lastUsed="2024-06-10"
-            onRevoke={handleRevokeKey}
-            onRegen={handleRegenerateKey}
-          />
-          <ApiKeySlide
-            name="Secondary Key"
-            preview="sk-****-5678"
-            createdAt="2024-02-20"
-            lastUsed="Never"
-            onRevoke={handleRevokeKey}
-            onRegen={handleRegenerateKey}
-          />
-        </div>
-        <button
-          class="keygen-button"
-          type="button"
-          onclick={() => dialog!.open()}
-        >
-          + Generate new key
-        </button>
+          <div class="actions">
+            <form method="POST" action="/logout" use:enhance>
+              <button type="submit" class="btn-logout">Log Out</button>
+            </form>
+          </div>
+        {:else if activeTab === "APIKeys"}
+          <h1 class="api-title">API Keys</h1>
+          <p>Generate/Manage API Keys, for Pulling Packages</p>
+          <div class="api-keys-list">
+            <ApiKeySlide
+              name="Default Key"
+              preview="sk-****-1234"
+              createdAt="2024-01-15"
+              lastUsed="2024-06-10"
+              expiresAt={new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)}
+              onRevoke={handleRevokeKey}
+              onRegen={handleRegenerateKey}
+            />
+            <ApiKeySlide
+              name="Secondary Key"
+              preview="sk-****-5678"
+              createdAt="2024-02-20"
+              lastUsed="Never"
+              expiresAt={new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)}
+              onRevoke={handleRevokeKey}
+              onRegen={handleRegenerateKey}
+            />
+          </div>
+          <button
+            class="keygen-button"
+            type="button"
+            onclick={() => dialog!.open()}
+          >
+            + Generate new key
+          </button>
 
-        <GenerateAPIKeyDialog
-          bind:this={dialog}
-          onGenerate={handleGenerateKey}
-          onCancel={() => dialog!.close()}
-        />
+          <GenerateAPIKeyDialog
+            bind:this={dialog}
+            onGenerate={handleGenerateKey}
+            onCancel={() => dialog!.close()}
+          />
+        {/if}
       {/if}
-    {/if}
+    </div>
   </div>
 </main>
 
@@ -119,6 +124,10 @@
     justify-content: center;
     min-height: calc(100vh - 4rem);
     padding: 3rem 1rem;
+  }
+
+  .tab-content {
+    padding: 0.5rem 2rem 2rem 2rem;
   }
 
   .keygen-button {
@@ -157,6 +166,14 @@
     transition: all 0.15s;
   }
 
+  .tab-btn:first-child {
+    border-radius: 12px 0 0 0;
+  }
+
+  .tab-btn:last-child {
+    border-radius: 0 12px 0 0;
+  }
+
   .tab-btn:hover {
     /* color: var(--text-primary); */
     background: var(--bg-secondary);
@@ -170,11 +187,11 @@
 
   .profile-card {
     width: 100%;
-    max-width: 40rem;
+    max-width: 45rem;
     border-radius: 12px;
     border: 1px solid var(--card-border);
     background: var(--card-bg);
-    padding: 0 2rem 2rem 2rem;
+    /* padding: 0 2rem 2rem 2rem; */
   }
 
   .api-title {

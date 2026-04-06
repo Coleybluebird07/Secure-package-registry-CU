@@ -1,14 +1,32 @@
 <script lang="ts">
   import ConfirmDialog from "./ConfirmDialog.svelte";
 
-  let { name, preview, createdAt, lastUsed, onRevoke, onRegen } = $props<{
-    name: string;
-    preview: string;
-    createdAt: string;
-    lastUsed: string;
-    onRevoke: (name: string) => void;
-    onRegen: (name: string) => void;
-  }>();
+  let { name, preview, createdAt, lastUsed, expiresAt, onRevoke, onRegen } =
+    $props<{
+      name: string;
+      preview: string;
+      createdAt: string;
+      lastUsed: string;
+      expiresAt: Date | null;
+      onRevoke: (name: string) => void;
+      onRegen: (name: string, expiryDays: number | null) => void;
+    }>();
+
+  const expiryLabel = $derived(
+    expiresAt === null
+      ? { text: "No expiry", class: "badge-never" }
+      : new Date() > expiresAt
+        ? { text: "Expired", class: "badge-expired" }
+        : new Date(expiresAt.getTime() - 30 * 24 * 60 * 60 * 1000) < new Date()
+          ? {
+              text: `Expires ${expiresAt.toLocaleDateString("en-GB")}`,
+              class: "badge-warn",
+            }
+          : {
+              text: `Expires ${expiresAt.toLocaleDateString("en-GB")}`,
+              class: "badge-ok",
+            },
+  );
 
   let revokeDialog: ConfirmDialog;
   let regenDialog: ConfirmDialog;
@@ -25,6 +43,9 @@
     </span>
   </div>
   <span class="key-preview">{preview}</span>
+  <div class="divider"></div>
+  <span class="badge {expiryLabel.class}">{expiryLabel.text}</span>
+
   <div class="key-right">
     <button
       class="btn-revoke"
@@ -65,6 +86,43 @@
 </div>
 
 <style>
+  .badge {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .badge-never {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+  }
+
+  .badge-ok {
+    background: rgba(34, 197, 94, 0.1);
+    color: #166534;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .badge-warn {
+    background: rgba(251, 191, 36, 0.1);
+    color: #92400e;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+  }
+
+  .badge-expired {
+    background: rgba(220, 38, 38, 0.08);
+    color: #dc2626;
+    border: 1px solid rgba(220, 38, 38, 0.2);
+  }
+
+  .divider {
+    width: 1px;
+    height: 1.5rem;
+    background: var(--border);
+  }
+
   .key-row {
     display: flex;
     justify-content: space-between;
@@ -95,7 +153,7 @@
   .key-right {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.5rem;
   }
 
   .key-preview {
@@ -105,7 +163,7 @@
   }
 
   .btn-revoke {
-    padding: 0.4rem 1rem;
+    padding: 0.4rem 0.75rem;
     font-size: 0.875rem;
     font-weight: 500;
     color: var(--text-primary);
