@@ -1,7 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { onMount } from "svelte";
   import { searchAPI } from "$lib/api";
   import type { PackageSummary, Ecosystem } from "$lib/types/api";
 
@@ -104,8 +103,15 @@
     await loadSearchFromUrl();
   }
 
-  onMount(async () => {
-    await loadSearchFromUrl();
+  let lastQuery = "";
+
+  $effect(() => {
+    const query = page.url.searchParams.toString();
+
+    if (query !== lastQuery) {
+      lastQuery = query;
+      loadSearchFromUrl();
+    }
   });
 </script>
 

@@ -2,7 +2,7 @@
   import { PUBLIC_HOME_BASE_URL } from "$env/static/public";
   import { goto } from "$app/navigation";
   import { searchAPI } from "$lib/api";
-  import type { Ecosystem, PackageSummary } from "$lib/types/api";
+  import type { PackageSummary } from "$lib/types/api";
 
   interface Props {
     isDark?: boolean;
@@ -13,20 +13,11 @@
   let { isDark = true, onToggleTheme, isLoggedIn = false }: Props = $props();
 
   let searchQuery = $state("");
-  let selectedEcosystem = $state<"" | Ecosystem>("");
   let suggestions = $state<PackageSummary[]>([]);
   let showSuggestions = $state(false);
   let loadingSuggestions = $state(false);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const ecosystems = [
-    { label: "All Ecosystems", value: "" as const },
-    { label: "npm", value: "npm" as const },
-    { label: "Go", value: "go" as const },
-    { label: "Cargo", value: "cargo" as const },
-    { label: "PyPI", value: "pypi" as const },
-  ];
 
   function trustColor(score: number): string {
     if (score >= 90) return "trust-high";
@@ -46,10 +37,7 @@
     loadingSuggestions = true;
 
     try {
-      const data = await searchAPI.search(
-        query,
-        selectedEcosystem || undefined,
-      );
+      const data = await searchAPI.search(query);
       suggestions = (data.items ?? []).slice(0, 6);
       showSuggestions = true;
     } catch {
@@ -69,17 +57,18 @@
   }
 
   async function submitSearch() {
-    const params = new URLSearchParams();
-
-    if (searchQuery.trim()) {
-      params.set("q", searchQuery.trim());
-    }
-
-    if (selectedEcosystem) {
-      params.set("ecosystem", selectedEcosystem);
-    }
+    const query = searchQuery.trim();
 
     showSuggestions = false;
+
+    if (!query) {
+      await goto("/search");
+      return;
+    }
+
+    const params = new URLSearchParams();
+    params.set("q", query);
+
     await goto(`/search?${params.toString()}`);
   }
 
