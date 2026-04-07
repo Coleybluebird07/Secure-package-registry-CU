@@ -3,14 +3,16 @@
   import { goto } from "$app/navigation";
   import { searchAPI } from "$lib/api";
   import type { PackageSummary } from "$lib/types/api";
+  import type { Session } from "$lib/client";
+  import { enhance } from "$app/forms";
 
   interface Props {
     isDark?: boolean;
     onToggleTheme: () => void;
-    isLoggedIn?: boolean;
+    user?: Session["user"] | null;
   }
 
-  let { isDark = true, onToggleTheme, isLoggedIn = false }: Props = $props();
+  let { isDark = true, onToggleTheme, user = null }: Props = $props();
 
   let searchQuery = $state("");
   let suggestions = $state<PackageSummary[]>([]);
@@ -100,10 +102,8 @@
 <header>
   <div class="header-left">
     <div class="logo">
-      <a class="clear-a-stylings" href={`${PUBLIC_HOME_BASE_URL}/`}>SPR</a>
+      <a class="clear-a-stylings" href="{PUBLIC_HOME_BASE_URL}/">SPR</a>
     </div>
-    <a href={`${PUBLIC_HOME_BASE_URL}/docs`} class="nav-link">Docs</a>
-    <a href={`${PUBLIC_HOME_BASE_URL}/pricing`} class="nav-link">Pricing</a>
   </div>
 
   <div class="header-middle">
@@ -162,21 +162,24 @@
       {/if}
     </div>
   </div>
-
-  {#if isLoggedIn}
+  {#if user}
     <div class="header-right">
       <button class="theme-toggle" onclick={onToggleTheme}>
         {isDark ? "Light" : "Dark"}
       </button>
-      <a href="/login" class="navbar-button">Log Out</a>
+      <a href="/profile" class="nav-link user-link">
+        {user.name || "User"}
+      </a>
+      <form method="POST" action="/logout" use:enhance>
+        <button type="submit" class="navbar-button">Log Out</button>
+      </form>
     </div>
   {:else}
     <div class="header-right">
       <button class="theme-toggle" onclick={onToggleTheme}>
         {isDark ? "Light" : "Dark"}
       </button>
-      <a href="/login" class="navbar-button">Log In</a>
-      <a href="/signup" class="navbar-button">Sign Up</a>
+      <a href="/login" class="navbar-button">Sign In</a>
     </div>
   {/if}
 </header>
@@ -356,85 +359,71 @@
     text-decoration: none;
     padding: 0.5rem 1.75rem;
     border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    transition: background 0.2s;
     font-size: 0.875rem;
     font-weight: 500;
     transition: background 0.2s;
   }
 
+  .navbar-button:hover {
+    background: var(--accent-hover);
+  }
+
+  form {
+    display: contents;
+  }
+
+  .clear-a-stylings {
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .logo {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-left: auto;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .header-middle {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+  }
+
   .theme-toggle {
-    border: none;
-    color: var(--wb-bg);
     background: var(--wb-bg-invert);
+    border: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--wb-bg);
     text-decoration: none;
     padding: 0.5rem;
     border-radius: 6px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    transition: color 0.3s;
+    transition: background 0.2s;
     cursor: pointer;
   }
 
-  .eco-badge {
-    display: inline-block;
-    padding: 0.125rem 0.5rem;
-    font-size: 0.7rem;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.025em;
-    border-radius: 999px;
-    border: 1px solid;
-    flex-shrink: 0;
-  }
-
-  .eco-badge.npm {
-    border-color: rgba(252, 165, 165, 0.4);
-    color: #b91c1c;
-    background: #fef2f2;
-  }
-
-  .eco-badge.go {
-    border-color: rgba(103, 232, 249, 0.4);
-    color: #0e7490;
-    background: #ecfeff;
-  }
-
-  .eco-badge.cargo {
-    border-color: rgba(253, 186, 116, 0.4);
-    color: #c2410c;
-    background: #fff7ed;
-  }
-
-  .eco-badge.pypi {
-    border-color: rgba(147, 197, 253, 0.4);
-    color: #1d4ed8;
-    background: #eff6ff;
-  }
-
-  .trust-pill {
-    flex-shrink: 0;
-    min-width: 2.5rem;
-    padding: 0.125rem 0.5rem;
-    font-size: 0.8rem;
-    font-weight: 800;
-    border-radius: 999px;
-    border: 1.5px solid;
-    text-align: center;
-    background: transparent;
-  }
-
-  .trust-high {
-    color: #16a34a;
-    border-color: #22c55e;
-  }
-
-  .trust-medium {
-    color: #f59e0b;
-    border-color: #fbbf24;
-  }
-
-  .trust-low {
-    color: #dc2626;
-    border-color: #ef4444;
+  .nav-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: color 0.3s;
   }
 
   @media (max-width: 1100px) {
@@ -482,5 +471,10 @@
       justify-content: flex-end;
       flex-wrap: wrap;
     }
+  }
+
+  .user-link {
+    font-weight: 600;
+    color: var(--text-primary);
   }
 </style>

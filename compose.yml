@@ -224,9 +224,21 @@ services:
       dockerfile: Containerfile
       args:
         PUBLIC_HOME_BASE_URL: ${PUBLIC_HOME_BASE_URL:-http://localhost:7003}
+        PUBLIC_DASHBOARD_BASE_URL: ${PUBLIC_DASHBOARD_BASE_URL:-http://localhost:7001}
     environment:
       - PORT=3000
       - HOST=0.0.0.0
+      # Database configuration for BetterAuth
+      - POSTGRES_HOST=core_db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=core
+      # Trusted origins for BetterAuth (CSRF protection)
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-http://localhost:7001,http://127.0.0.1:7001}
+    depends_on:
+      core_db:
+        condition: service_healthy
     restart: unless-stopped
 
   home-ui:

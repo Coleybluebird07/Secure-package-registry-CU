@@ -5,6 +5,12 @@ import { sveltekitCookies } from "better-auth/svelte-kit";
 import { Pool } from "pg";
 import { getRequestEvent } from "$app/server";
 
+// Parse TRUSTED_ORIGINS from environment variable
+// Format: comma-separated list of origins, e.g., "http://localhost:7001
+const trustedOrigins = process.env.TRUSTED_ORIGINS?.split(",")
+	.map((origin) => origin.trim())
+	.filter((origin) => origin.length > 0) ?? ["http://localhost:7001"];
+
 export const auth = betterAuth({
 	database: new Pool({
 		database: process.env.POSTGRES_DB,
@@ -25,4 +31,6 @@ export const auth = betterAuth({
 		apiKey(),
 		sveltekitCookies(getRequestEvent), // make sure this is the last plugin in the array
 	],
+
+	trustedOrigins,
 });

@@ -276,13 +276,14 @@
     font-weight: 700;
   }
 
-  .search-actions {
-    display: flex;
+  .search-row {
+    display: grid;
+    grid-template-columns: 1fr 180px auto auto;
     gap: 0.625rem;
     align-items: center;
-    flex-wrap: wrap;
   }
 
+  .search-input,
   .eco-select {
     padding: 0.625rem 0.875rem;
     font-size: 0.93rem;
