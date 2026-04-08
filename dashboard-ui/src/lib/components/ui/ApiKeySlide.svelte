@@ -9,7 +9,7 @@
       lastUsed: string;
       expiresAt: Date | null;
       onRevoke: (name: string) => void;
-      onRegen: (name: string, expiryDays: number | null) => void;
+      onRegen: () => void;
     }>();
 
   const expiryLabel = $derived(

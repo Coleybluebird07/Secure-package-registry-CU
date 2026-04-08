@@ -3,6 +3,8 @@
   import { enhance } from "$app/forms";
   import ApiKeySlide from "$lib/components/ui/ApiKeySlide.svelte";
   import GenerateAPIKeyDialog from "$lib/components/ui/GenerateAPIKeyDialog.svelte";
+  import { authClient } from "$lib/client";
+  import type { ApiKey } from "@better-auth/api-key";
 
   const user = $derived(page.data.user);
 
@@ -10,18 +12,52 @@
 
   let activeTab: "profile" | "APIKeys" = $state("profile");
 
-  function handleGenerateKey(tokenName: string, expiryDays: number | null) {
-    const fakeKey = "fake_token_" + crypto.randomUUID().replace(/-/g, "");
-    dialog!.openWithKey(fakeKey);
+  let apiKeys = $state<Omit<ApiKey, "key">[]>([]);
+
+  async function updateKeys() {
+    const { data, error } = await authClient.apiKey.list();
+    if (!error) apiKeys = data.apiKeys;
   }
 
-  function handleRevokeKey(keyName: string) {
-    alert("Revoked key: " + keyName);
+  updateKeys();
+
+  async function handleGenerateKey(
+    tokenName: string,
+    expiryDays: number | null,
+  ) {
+    const { data, error } = await authClient.apiKey.create({
+      name: tokenName,
+      expiresIn: expiryDays ? expiryDays * 24 * 60 * 60 : undefined,
+    });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    await updateKeys();
+    dialog!.openWithKey(data.key);
   }
 
-  function handleRegenerateKey(keyName: string, expiryDays: number | null) {
-    const fakeKey = "fake_token_" + crypto.randomUUID().replace(/-/g, "");
-    dialog!.openWithKey(fakeKey);
+  async function handleRevokeKey(id: string) {
+    await authClient.apiKey.delete({ keyId: id });
+    await updateKeys();
+  }
+
+  async function handleRegenerateKey(
+    id: string,
+    name: string,
+    expiryDays: number | null,
+  ) {
+    await authClient.apiKey.delete({ keyId: id });
+    const { data, error } = await authClient.apiKey.create({
+      name,
+      expiresIn: expiryDays ? expiryDays * 24 * 60 * 60 : undefined,
+    });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    await updateKeys();
+    dialog!.openWithKey(data.key);
   }
 </script>
 
@@ -79,24 +115,33 @@
           <h1 class="api-title">API Keys</h1>
           <p>Generate/Manage API Keys, for Pulling Packages</p>
           <div class="api-keys-list">
-            <ApiKeySlide
-              name="Default Key"
-              preview="sk-****-1234"
-              createdAt="2024-01-15"
-              lastUsed="2024-06-10"
-              expiresAt={new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)}
-              onRevoke={handleRevokeKey}
-              onRegen={handleRegenerateKey}
-            />
-            <ApiKeySlide
-              name="Secondary Key"
-              preview="sk-****-5678"
-              createdAt="2024-02-20"
-              lastUsed="Never"
-              expiresAt={new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)}
-              onRevoke={handleRevokeKey}
-              onRegen={handleRegenerateKey}
-            />
+            <div class="api-keys-list">
+              {#each apiKeys as key (key.id)}
+                <ApiKeySlide
+                  name={key.name ?? "Unnamed"}
+                  preview={key.start ? `${key.start}••••` : "••••••••"}
+                  createdAt={new Date(key.createdAt).toLocaleDateString(
+                    "en-GB",
+                  )}
+                  lastUsed={key.lastRequest
+                    ? new Date(key.lastRequest).toLocaleDateString("en-GB")
+                    : "Never"}
+                  expiresAt={key.expiresAt ? new Date(key.expiresAt) : null}
+                  onRevoke={() => handleRevokeKey(key.id)}
+                  onRegen={() =>
+                    handleRegenerateKey(
+                      key.id,
+                      key.name ?? "Unnamed",
+                      key.expiresAt
+                        ? Math.round(
+                            (new Date(key.expiresAt).getTime() - Date.now()) /
+                              (24 * 60 * 60 * 1000),
+                          )
+                        : null,
+                    )}
+                />
+              {/each}
+            </div>
           </div>
           <button
             class="keygen-button"

@@ -1,4 +1,5 @@
 import { redirect } from "@sveltejs/kit";
+import { authClient } from "$lib/client";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ parent }) => {
@@ -6,5 +7,6 @@ export const load: PageServerLoad = async ({ parent }) => {
 	if (!user) {
 		redirect(302, "/login");
 	}
+
 	return {};
 };
