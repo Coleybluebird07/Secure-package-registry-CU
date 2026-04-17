@@ -87,7 +87,7 @@ SET latest_version = $2, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1;
 
 -- name: GetPackageByEcosystemAndIdentifier :one
-SELECT id, identifier, ecosystem, latest_version
+SELECT id, identifier, ecosystem, latest_version, maintainer_trust_level
 FROM packages
 WHERE ecosystem = $1
   AND identifier = $2;
@@ -233,3 +233,61 @@ INSERT INTO "user" (
 ) VALUES ($1, $2, FALSE, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING
 RETURNING "id";
+
+-- name: GetPackageVersionByPackageIDAndVersion :one
+SELECT *
+FROM package_versions
+WHERE package_id = $1
+  AND version = $2
+LIMIT 1;
+
+-- name: GetPackageReviewByPackageVersionID :one
+SELECT
+    id,
+    package_version_id,
+    status,
+    notes,
+    reviewed_by,
+    reviewed_at,
+    updated_at
+FROM package_reviews
+WHERE package_version_id = $1
+LIMIT 1;
+
+-- name: UpsertPackageReview :one
+INSERT INTO package_reviews (
+    package_version_id,
+    status,
+    notes,
+    reviewed_by,
+    reviewed_at
+)
+VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           NOW()
+       )
+ON CONFLICT (package_version_id)
+    DO UPDATE SET
+                  status = EXCLUDED.status,
+                  notes = EXCLUDED.notes,
+                  reviewed_by = EXCLUDED.reviewed_by,
+                  reviewed_at = NOW(),
+                  updated_at = NOW()
+RETURNING
+    id,
+    package_version_id,
+    status,
+    notes,
+    reviewed_by,
+    reviewed_at,
+    created_at,
+    updated_at;
+
+-- name: UpdatePackageMaintainerTrustLevel :exec
+UPDATE packages
+SET maintainer_trust_level = $2,
+    updated_at = NOW()
+WHERE id = $1;

@@ -143,6 +143,49 @@ func (ns NullPkgVtype) Value() (driver.Value, error) {
 	return string(ns.PkgVtype), nil
 }
 
+type ReviewStatus string
+
+const (
+	ReviewStatusPending  ReviewStatus = "pending"
+	ReviewStatusApproved ReviewStatus = "approved"
+	ReviewStatusRejected ReviewStatus = "rejected"
+)
+
+func (e *ReviewStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ReviewStatus(s)
+	case string:
+		*e = ReviewStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ReviewStatus: %T", src)
+	}
+	return nil
+}
+
+type NullReviewStatus struct {
+	ReviewStatus ReviewStatus
+	Valid        bool // Valid is true if ReviewStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullReviewStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ReviewStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ReviewStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullReviewStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ReviewStatus), nil
+}
+
 type Account struct {
 	ID                    string
 	AccountId             string
@@ -242,6 +285,17 @@ type Package struct {
 	MaintainerTrustLevel pgtype.Int4
 	CreatedAt            pgtype.Timestamptz
 	UpdatedAt            pgtype.Timestamptz
+}
+
+type PackageReview struct {
+	ID               int32
+	PackageVersionID int32
+	Status           ReviewStatus
+	Notes            pgtype.Text
+	ReviewedBy       pgtype.Text
+	ReviewedAt       pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
 }
 
 type PackageTagType struct {

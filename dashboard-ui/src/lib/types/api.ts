@@ -133,3 +133,32 @@ export interface PackageVersionDetail {
 		data: string; // base64 encoded JSON
 	}>;
 }
+
+// Package Review
+
+export type ReviewStatus = "pending" | "approved" | "rejected";
+
+export interface PackageReview {
+	status: ReviewStatus;
+	notes?: string;
+	updated_at?: string;
+	updated_by?: string;
+}
+
+export interface AdminPackageDetail extends PackageVersion {
+	maintainer_trust_level: number;
+	review?: PackageReview;
+}
+
+export interface UpdatePackageReviewRequest {
+	status: ReviewStatus;
+	notes?: string;
+	maintainer_trust_level?: number;
+}
+
+export interface UpdatePackageReviewResponse {
+	identifier: string;
+	ecosystem: string;
+	maintainer_trust_level: number;
+	review: PackageReview;
+}

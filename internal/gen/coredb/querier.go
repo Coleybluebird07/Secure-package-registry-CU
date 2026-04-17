@@ -13,7 +13,9 @@ type Querier interface {
 	GetAPIKeyOwner(ctx context.Context, key string) (string, error)
 	GetCollectionTask(ctx context.Context, id int32) (CollectionTask, error)
 	GetPackageByEcosystemAndIdentifier(ctx context.Context, arg GetPackageByEcosystemAndIdentifierParams) (GetPackageByEcosystemAndIdentifierRow, error)
+	GetPackageReviewByPackageVersionID(ctx context.Context, packageVersionID int32) (GetPackageReviewByPackageVersionIDRow, error)
 	GetPackageVersion(ctx context.Context, arg GetPackageVersionParams) (GetPackageVersionRow, error)
+	GetPackageVersionByPackageIDAndVersion(ctx context.Context, arg GetPackageVersionByPackageIDAndVersionParams) (PackageVersion, error)
 	GetPackageVersionTags(ctx context.Context, arg GetPackageVersionTagsParams) ([]GetPackageVersionTagsRow, error)
 	// Finds the succeeded collection task for a given ecosystem, package identifier, and version.
 	// Returns the artifact location needed for serving deduped behavior data.
@@ -47,6 +49,8 @@ type Querier interface {
 	UpdateCollectionTaskStatus(ctx context.Context, arg UpdateCollectionTaskStatusParams) error
 	UpdateCollectionTaskSucceeded(ctx context.Context, arg UpdateCollectionTaskSucceededParams) error
 	UpdatePackageLatestVersion(ctx context.Context, arg UpdatePackageLatestVersionParams) error
+	UpdatePackageMaintainerTrustLevel(ctx context.Context, arg UpdatePackageMaintainerTrustLevelParams) error
+	UpsertPackageReview(ctx context.Context, arg UpsertPackageReviewParams) (PackageReview, error)
 }
 
 var _ Querier = (*Queries)(nil)

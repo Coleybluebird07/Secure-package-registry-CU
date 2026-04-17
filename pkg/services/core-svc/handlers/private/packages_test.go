@@ -120,6 +120,22 @@ func (m *mockQuerier) InsertUser(ctx context.Context, arg coredb.InsertUserParam
 	panic("not used")
 }
 
+func (m *mockQuerier) GetPackageReviewByPackageVersionID(ctx context.Context, id int32) (coredb.GetPackageReviewByPackageVersionIDRow, error) {
+	return coredb.GetPackageReviewByPackageVersionIDRow{}, nil
+}
+
+func (m *mockQuerier) GetPackageVersionByPackageIDAndVersion(ctx context.Context, arg coredb.GetPackageVersionByPackageIDAndVersionParams) (coredb.PackageVersion, error) {
+	return coredb.PackageVersion{}, nil
+}
+
+func (m *mockQuerier) UpdatePackageMaintainerTrustLevel(ctx context.Context, arg coredb.UpdatePackageMaintainerTrustLevelParams) error {
+	return nil
+}
+
+func (m *mockQuerier) UpsertPackageReview(ctx context.Context, arg coredb.UpsertPackageReviewParams) (coredb.PackageReview, error) {
+	return coredb.PackageReview{}, nil
+}
+
 type mockPublisher struct {
 	published []*publishedMessage
 	err       error

@@ -58,7 +58,7 @@ func (q *Queries) GetCollectionTask(ctx context.Context, id int32) (CollectionTa
 }
 
 const getPackageByEcosystemAndIdentifier = `-- name: GetPackageByEcosystemAndIdentifier :one
-SELECT id, identifier, ecosystem, latest_version
+SELECT id, identifier, ecosystem, latest_version, maintainer_trust_level
 FROM packages
 WHERE ecosystem = $1
   AND identifier = $2
@@ -70,10 +70,11 @@ type GetPackageByEcosystemAndIdentifierParams struct {
 }
 
 type GetPackageByEcosystemAndIdentifierRow struct {
-	ID            int32
-	Identifier    string
-	Ecosystem     Ecosystem
-	LatestVersion pgtype.Text
+	ID                   int32
+	Identifier           string
+	Ecosystem            Ecosystem
+	LatestVersion        pgtype.Text
+	MaintainerTrustLevel pgtype.Int4
 }
 
 func (q *Queries) GetPackageByEcosystemAndIdentifier(ctx context.Context, arg GetPackageByEcosystemAndIdentifierParams) (GetPackageByEcosystemAndIdentifierRow, error) {
@@ -84,6 +85,46 @@ func (q *Queries) GetPackageByEcosystemAndIdentifier(ctx context.Context, arg Ge
 		&i.Identifier,
 		&i.Ecosystem,
 		&i.LatestVersion,
+		&i.MaintainerTrustLevel,
+	)
+	return i, err
+}
+
+const getPackageReviewByPackageVersionID = `-- name: GetPackageReviewByPackageVersionID :one
+SELECT
+    id,
+    package_version_id,
+    status,
+    notes,
+    reviewed_by,
+    reviewed_at,
+    updated_at
+FROM package_reviews
+WHERE package_version_id = $1
+LIMIT 1
+`
+
+type GetPackageReviewByPackageVersionIDRow struct {
+	ID               int32
+	PackageVersionID int32
+	Status           ReviewStatus
+	Notes            pgtype.Text
+	ReviewedBy       pgtype.Text
+	ReviewedAt       pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+func (q *Queries) GetPackageReviewByPackageVersionID(ctx context.Context, packageVersionID int32) (GetPackageReviewByPackageVersionIDRow, error) {
+	row := q.db.QueryRow(ctx, getPackageReviewByPackageVersionID, packageVersionID)
+	var i GetPackageReviewByPackageVersionIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.PackageVersionID,
+		&i.Status,
+		&i.Notes,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -137,6 +178,36 @@ func (q *Queries) GetPackageVersion(ctx context.Context, arg GetPackageVersionPa
 		&i.SourceCommitHash,
 		&i.TrustLevel,
 		&i.MaintainerNotes,
+	)
+	return i, err
+}
+
+const getPackageVersionByPackageIDAndVersion = `-- name: GetPackageVersionByPackageIDAndVersion :one
+SELECT id, package_id, version, source_url, source_tag, source_commit_hash, maintainer_notes, created_at, updated_at
+FROM package_versions
+WHERE package_id = $1
+  AND version = $2
+LIMIT 1
+`
+
+type GetPackageVersionByPackageIDAndVersionParams struct {
+	PackageID int32
+	Version   string
+}
+
+func (q *Queries) GetPackageVersionByPackageIDAndVersion(ctx context.Context, arg GetPackageVersionByPackageIDAndVersionParams) (PackageVersion, error) {
+	row := q.db.QueryRow(ctx, getPackageVersionByPackageIDAndVersion, arg.PackageID, arg.Version)
+	var i PackageVersion
+	err := row.Scan(
+		&i.ID,
+		&i.PackageID,
+		&i.Version,
+		&i.SourceUrl,
+		&i.SourceTag,
+		&i.SourceCommitHash,
+		&i.MaintainerNotes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -712,4 +783,82 @@ type UpdatePackageLatestVersionParams struct {
 func (q *Queries) UpdatePackageLatestVersion(ctx context.Context, arg UpdatePackageLatestVersionParams) error {
 	_, err := q.db.Exec(ctx, updatePackageLatestVersion, arg.ID, arg.LatestVersion)
 	return err
+}
+
+const updatePackageMaintainerTrustLevel = `-- name: UpdatePackageMaintainerTrustLevel :exec
+UPDATE packages
+SET maintainer_trust_level = $2,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdatePackageMaintainerTrustLevelParams struct {
+	ID                   int32
+	MaintainerTrustLevel pgtype.Int4
+}
+
+func (q *Queries) UpdatePackageMaintainerTrustLevel(ctx context.Context, arg UpdatePackageMaintainerTrustLevelParams) error {
+	_, err := q.db.Exec(ctx, updatePackageMaintainerTrustLevel, arg.ID, arg.MaintainerTrustLevel)
+	return err
+}
+
+const upsertPackageReview = `-- name: UpsertPackageReview :one
+INSERT INTO package_reviews (
+    package_version_id,
+    status,
+    notes,
+    reviewed_by,
+    reviewed_at
+)
+VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           NOW()
+       )
+ON CONFLICT (package_version_id)
+    DO UPDATE SET
+                  status = EXCLUDED.status,
+                  notes = EXCLUDED.notes,
+                  reviewed_by = EXCLUDED.reviewed_by,
+                  reviewed_at = NOW(),
+                  updated_at = NOW()
+RETURNING
+    id,
+    package_version_id,
+    status,
+    notes,
+    reviewed_by,
+    reviewed_at,
+    created_at,
+    updated_at
+`
+
+type UpsertPackageReviewParams struct {
+	PackageVersionID int32
+	Status           ReviewStatus
+	Notes            pgtype.Text
+	ReviewedBy       pgtype.Text
+}
+
+func (q *Queries) UpsertPackageReview(ctx context.Context, arg UpsertPackageReviewParams) (PackageReview, error) {
+	row := q.db.QueryRow(ctx, upsertPackageReview,
+		arg.PackageVersionID,
+		arg.Status,
+		arg.Notes,
+		arg.ReviewedBy,
+	)
+	var i PackageReview
+	err := row.Scan(
+		&i.ID,
+		&i.PackageVersionID,
+		&i.Status,
+		&i.Notes,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

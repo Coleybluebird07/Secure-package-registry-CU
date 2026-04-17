@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"git.duti.dev/secure-package-registry/internal/gen/coredb"
 	"git.duti.dev/secure-package-registry/internal/messages"
@@ -47,6 +48,7 @@ func NewAdminHandler(db coredb.Querier, publisher message.Publisher, minio *sprm
 	r.Post("/packages", h.AddPackage)
 	r.Get("/packages/{ecosystem}/{identifier}/versions", h.ListVersions)
 	r.Post("/packages/{ecosystem}/{identifier}/scan", h.TriggerScan)
+	r.Post("/packages/{ecosystem}/{identifier}/review", h.UpdateReview)
 	r.Get("/packages/{ecosystem}/{identifier}/behavior", h.GetBehavior)
 	r.Get("/packages/{ecosystem}/{identifier}/behavior/raw", h.GetBehaviorRaw)
 	r.Get("/tasks", h.ListTasks)
@@ -212,12 +214,49 @@ func (h *AdminHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	if pkg.LatestVersion.Valid {
 		latestVersion = &pkg.LatestVersion.String
 	}
+	var reviewData any = nil
+
+	if pkg.LatestVersion.Valid {
+		pv, err := h.db.GetPackageVersionByPackageIDAndVersion(ctx, coredb.GetPackageVersionByPackageIDAndVersionParams{
+			PackageID: pkg.ID,
+			Version:   pkg.LatestVersion.String,
+		})
+		if err == nil {
+			review, err := h.db.GetPackageReviewByPackageVersionID(ctx, pv.ID)
+			if err == nil {
+				var notes *string
+				if review.Notes.Valid {
+					notes = &review.Notes.String
+				}
+
+				var updatedBy *string
+				if review.ReviewedBy.Valid {
+					updatedBy = &review.ReviewedBy.String
+				}
+
+				var updatedAt *string
+				if review.UpdatedAt.Valid {
+					s := review.UpdatedAt.Time.Format(time.RFC3339)
+					updatedAt = &s
+				}
+
+				reviewData = map[string]any{
+					"status":     string(review.Status),
+					"notes":      notes,
+					"updated_by": updatedBy,
+					"updated_at": updatedAt,
+				}
+			}
+		}
+	}
 
 	render.JSON(w, r, map[string]any{
-		"identifier":     identifier,
-		"ecosystem":      ecoStr,
-		"latest_version": latestVersion,
-		"versions":       versions,
+		"identifier":             identifier,
+		"ecosystem":              ecoStr,
+		"latest_version":         latestVersion,
+		"maintainer_trust_level": pkg.MaintainerTrustLevel,
+		"versions":               versions,
+		"review":                 reviewData,
 	})
 }
 
@@ -619,4 +658,139 @@ func validEcosystem(eco coredb.Ecosystem) bool {
 	default:
 		return false
 	}
+}
+
+// UpdateReviewRequest is the request body for updating a package review.
+type UpdateReviewRequest struct {
+	Status               string `json:"status"`      // e.g. "approved", "rejected", "pending"
+	Notes                string `json:"notes"`       // Optional notes from the reviewer
+	ReviewedBy           string `json:"reviewed_by"` // Name or identifier of the reviewer;
+	MaintainerTrustLevel int32  `json:"maintainer_trust_level"`
+}
+
+func (h *AdminHandler) UpdateReview(w http.ResponseWriter, r *http.Request) {
+	ecoStr := chi.URLParam(r, "ecosystem")
+	identifier, _ := url.PathUnescape(chi.URLParam(r, "identifier"))
+
+	ecoSystem := coredb.Ecosystem(ecoStr)
+	if !validEcosystem(ecoSystem) {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid ecosystem: " + ecoStr})
+		return
+	}
+
+	var req UpdateReviewRequest
+	if err := render.DecodeJSON(r.Body, &req); err != nil {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.Status != "pending" && req.Status != "approved" && req.Status != "rejected" {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid request body"})
+		return
+	}
+
+	if req.MaintainerTrustLevel < 0 || req.MaintainerTrustLevel > 100 {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "maintainer_trust_level must be between 0 and 100"})
+	}
+
+	ctx := r.Context()
+
+	pkg, err := h.db.GetPackageByEcosystemAndIdentifier(ctx, coredb.GetPackageByEcosystemAndIdentifierParams{
+		Ecosystem:  ecoSystem,
+		Identifier: identifier,
+	})
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		render.Status(r, http.StatusNotFound)
+		render.JSON(w, r, map[string]string{"error": "package not found"})
+		return
+	}
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Msg("Failed to look up package")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to look up package"})
+		return
+	}
+
+	if !pkg.LatestVersion.Valid {
+		render.Status(r, http.StatusNotFound)
+		render.JSON(w, r, map[string]string{"error": "package has no latest version"})
+	}
+
+	pv, err := h.db.GetPackageVersionByPackageIDAndVersion(ctx, coredb.GetPackageVersionByPackageIDAndVersionParams{
+		PackageID: pkg.ID,
+		Version:   pkg.LatestVersion.String,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		render.Status(r, http.StatusNotFound)
+		render.JSON(w, r, map[string]string{"error": "package version not found"})
+		return
+	}
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Msg("Failed to look up package version")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to look up package version"})
+		return
+	}
+
+	reviewer := strings.TrimSpace(req.ReviewedBy)
+	if reviewer == "" {
+		reviewer = "unknown"
+	}
+
+	review, err := h.db.UpsertPackageReview(ctx, coredb.UpsertPackageReviewParams{
+		PackageVersionID: pv.ID,
+		Status:           coredb.ReviewStatus(req.Status),
+		Notes:            pgtype.Text{String: req.Notes, Valid: req.Notes != ""},
+		ReviewedBy:       pgtype.Text{String: reviewer, Valid: true},
+	})
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Msg("Failed to upsert package review")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to save review"})
+		return
+	}
+
+	if err := h.db.UpdatePackageMaintainerTrustLevel(ctx, coredb.UpdatePackageMaintainerTrustLevelParams{
+		ID: pkg.ID,
+		MaintainerTrustLevel: pgtype.Int4{
+			Int32: req.MaintainerTrustLevel,
+			Valid: true,
+		},
+	}); err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Msg("Failed to update trust level")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to update trust level"})
+		return
+	}
+	var notes *string
+	if review.Notes.Valid {
+		notes = &review.Notes.String
+	}
+
+	var updatedBy *string
+	if review.ReviewedBy.Valid {
+		updatedBy = &review.ReviewedBy.String
+	}
+
+	var updatedAt *string
+	if review.UpdatedAt.Valid {
+		s := review.UpdatedAt.Time.Format(time.RFC3339)
+		updatedAt = &s
+	}
+
+	render.JSON(w, r, map[string]any{
+		"identifier": identifier,
+		"ecosystem":  ecoStr,
+		"review": map[string]any{
+			"status":     string(review.Status),
+			"notes":      notes,
+			"updated_by": updatedBy,
+			"updated_at": updatedAt,
+		},
+	})
 }

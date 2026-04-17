@@ -1,6 +1,7 @@
 import type {
 	AddPackageRequest,
 	AddPackageResponse,
+	AdminPackageDetail,
 	Ecosystem,
 	ListPackagesResponse,
 	ListTasksResponse,
@@ -10,6 +11,8 @@ import type {
 	SearchResult,
 	TriggerScanRequest,
 	TriggerScanResponse,
+	UpdatePackageReviewRequest,
+	UpdatePackageReviewResponse,
 } from "$lib/types/api.js";
 
 const API_BASE = "/api/v1";
@@ -89,6 +92,29 @@ export const packagesAPI = {
 				body: JSON.stringify(data),
 				method: "POST",
 			},
+		);
+	},
+
+	updateReview: (
+		ecosystem: string,
+		identifier: string,
+		data: UpdatePackageReviewRequest,
+	): Promise<UpdatePackageReviewResponse> => {
+		return fetchJSON(
+			`${API_BASE}/admin/packages/${encodeURIComponent(ecosystem)}/${encodeURIComponent(identifier)}/review`,
+			{
+				body: JSON.stringify(data),
+				method: "POST",
+			},
+		);
+	},
+
+	versionDetails: (
+		ecosystem: string,
+		identifier: string,
+	): Promise<AdminPackageDetail> => {
+		return fetchJSON(
+			`${API_BASE}/admin/packages/${encodeURIComponent(ecosystem)}/${encodeURIComponent(identifier)}/versions`,
 		);
 	},
 
