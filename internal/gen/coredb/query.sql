@@ -10,10 +10,14 @@ SELECT
     p.maintainer_trust_level AS trust_level,
     pv.maintainer_notes
 FROM packages p
-JOIN package_versions pv ON pv.package_id = p.id
+         JOIN package_versions pv
+              ON pv.package_id = p.id
+         JOIN package_reviews pr
+              ON pr.package_version_id = pv.id
 WHERE p.ecosystem = $1
   AND p.identifier = $2
-  AND pv.version = $3;
+  AND pv.version = $3
+  AND pr.status = 'approved';
 
 -- name: GetPackageVersionTags :many
 SELECT
@@ -34,8 +38,14 @@ SELECT
     p.ecosystem::text,
     p.latest_version
 FROM packages p
+         JOIN package_versions pv
+              ON pv.package_id = p.id
+                  AND pv.version = p.latest_version
+         JOIN package_reviews pr
+              ON pr.package_version_id = pv.id
 WHERE p.identifier ILIKE '%' || sqlc.arg(query) || '%'
   AND (sqlc.narg(ecosystem)::ECOSYSTEM IS NULL OR p.ecosystem = sqlc.narg(ecosystem)::ECOSYSTEM)
+  AND pr.status = 'approved'
 ORDER BY p.identifier
 LIMIT sqlc.arg(page_size) OFFSET (sqlc.arg(page) - 1) * sqlc.arg(page_size);
 

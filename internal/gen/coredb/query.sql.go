@@ -141,10 +141,14 @@ SELECT
     p.maintainer_trust_level AS trust_level,
     pv.maintainer_notes
 FROM packages p
-JOIN package_versions pv ON pv.package_id = p.id
+         JOIN package_versions pv
+              ON pv.package_id = p.id
+         JOIN package_reviews pr
+              ON pr.package_version_id = pv.id
 WHERE p.ecosystem = $1
   AND p.identifier = $2
   AND pv.version = $3
+  AND pr.status = 'approved'
 `
 
 type GetPackageVersionParams struct {
@@ -637,8 +641,14 @@ SELECT
     p.ecosystem::text,
     p.latest_version
 FROM packages p
+         JOIN package_versions pv
+              ON pv.package_id = p.id
+                  AND pv.version = p.latest_version
+         JOIN package_reviews pr
+              ON pr.package_version_id = pv.id
 WHERE p.identifier ILIKE '%' || $1 || '%'
   AND ($2::ECOSYSTEM IS NULL OR p.ecosystem = $2::ECOSYSTEM)
+  AND pr.status = 'approved'
 ORDER BY p.identifier
 LIMIT $4 OFFSET ($3 - 1) * $4
 `
