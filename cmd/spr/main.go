@@ -1,4 +1,4 @@
-// Command spr runs all services (core-svc, poller, be-runner, reg-proxy) in a
+// Command spr runs all services (core-svc, poller, be-runner, rebuild-worker, reg-proxy) in a
 // single process using an errgroup. If any service returns an error, the
 // remaining services are cancelled and the process exits with the first error.
 package main
@@ -12,6 +12,7 @@ import (
 	berunner "git.duti.dev/secure-package-registry/pkg/services/be-runner"
 	coresvc "git.duti.dev/secure-package-registry/pkg/services/core-svc"
 	packagewatcher "git.duti.dev/secure-package-registry/pkg/services/package-watcher"
+	rebuildworker "git.duti.dev/secure-package-registry/pkg/services/rebuild-worker"
 	regproxy "git.duti.dev/secure-package-registry/pkg/services/reg-proxy"
 	"git.duti.dev/secure-package-registry/pkg/services/seed"
 
@@ -66,6 +67,10 @@ func main() {
 
 	g.Go(func() error {
 		return berunner.Start(gCtx, deps)
+	})
+
+	g.Go(func() error {
+		return rebuildworker.Start(gCtx, deps)
 	})
 
 	g.Go(func() error {
