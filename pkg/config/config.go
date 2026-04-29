@@ -34,6 +34,12 @@ type MinIOConfig struct {
 	Bucket    string
 }
 
+type RebuildConfig struct {
+	OSSRebuildCmd string
+	DiffoscopeCmd string
+	WorkDir       string
+}
+
 // This includes configuration required by all microservices. For example, RabbitMQ connection details are required to communicate between the services
 type CoreSvcConfig struct {
 	ExternalPort string
@@ -50,6 +56,7 @@ type CoreConfig struct {
 	NPM          NPMConfig
 	GitHub       GitHubConfig
 	MinIO        MinIOConfig
+	Rebuild      RebuildConfig
 	ReverseProxy ReverseProxyConfig
 }
 
@@ -65,11 +72,21 @@ func NewCoreConfig(modifiers ...modifier) *CoreConfig {
 			ExternalPort: "8080",
 			InternalPort: "8081",
 		},
+		NPM: NPMConfig{
+			RegistryURL:  "https://registry.npmjs.org",
+			ReplicateURL: "https://replicate.npmjs.com",
+			HTTPTimeout:  10 * time.Second,
+		},
 		MinIO: MinIOConfig{
 			Endpoint:  "minio:9000",
 			AccessKey: "minio",
 			SecretKey: "minio_pass",
 			Bucket:    "behavior",
+		},
+		Rebuild: RebuildConfig{
+			OSSRebuildCmd: "",
+			DiffoscopeCmd: "diffoscope",
+			WorkDir:       "/tmp/spr-rebuild",
 		},
 		ReverseProxy: ReverseProxyConfig{
 			ExternalURL: "http://localhost:7002",
@@ -91,8 +108,9 @@ func WithEnv() modifier {
 		cfg.ValkeyURL = getEnv("VALKEY_URL", cfg.ValkeyURL)
 		cfg.CoreSvc.ExternalPort = getEnv("EXTERNAL_PORT", cfg.CoreSvc.ExternalPort)
 		cfg.CoreSvc.InternalPort = getEnv("INTERNAL_PORT", cfg.CoreSvc.InternalPort)
-		cfg.NPM.RegistryURL = getEnv("NPM_REGISTRY_URL", "https://registry.npmjs.org")
-		cfg.NPM.ReplicateURL = getEnv("NPM_REPLICATE_URL", "https://replicate.npmjs.com")
+
+		cfg.NPM.RegistryURL = getEnv("NPM_REGISTRY_URL", cfg.NPM.RegistryURL)
+		cfg.NPM.ReplicateURL = getEnv("NPM_REPLICATE_URL", cfg.NPM.ReplicateURL)
 		if timeoutStr := getEnv("NPM_HTTP_TIMEOUT", "10s"); timeoutStr != "" {
 			if timeout, err := time.ParseDuration(timeoutStr); err == nil {
 				cfg.NPM.HTTPTimeout = timeout
@@ -100,10 +118,12 @@ func WithEnv() modifier {
 				cfg.NPM.HTTPTimeout = 10 * time.Second
 			}
 		}
+
 		cfg.GitHub.Token = getEnv("GITHUB_TOKEN", "")
 		cfg.GitHub.Owner = getEnv("GITHUB_OWNER", "")
 		cfg.GitHub.Repo = getEnv("GITHUB_REPO", "")
 		cfg.GitHub.WorkflowFile = getEnv("GITHUB_WORKFLOW_FILE", "collect-behavior.yml")
+
 		cfg.MinIO.Endpoint = getEnv("MINIO_ENDPOINT", cfg.MinIO.Endpoint)
 		cfg.MinIO.AccessKey = getEnv("MINIO_ACCESS_KEY", cfg.MinIO.AccessKey)
 		cfg.MinIO.SecretKey = getEnv("MINIO_SECRET_KEY", cfg.MinIO.SecretKey)
@@ -111,6 +131,10 @@ func WithEnv() modifier {
 		if sslStr := getEnv("MINIO_USE_SSL", ""); sslStr != "" {
 			cfg.MinIO.UseSSL = sslStr == "true" || sslStr == "1"
 		}
+
+		cfg.Rebuild.OSSRebuildCmd = getEnv("OSS_REBUILD_CMD", cfg.Rebuild.OSSRebuildCmd)
+		cfg.Rebuild.DiffoscopeCmd = getEnv("DIFFOSCOPE_CMD", cfg.Rebuild.DiffoscopeCmd)
+		cfg.Rebuild.WorkDir = getEnv("REBUILD_WORK_DIR", cfg.Rebuild.WorkDir)
 
 		cfg.ReverseProxy.ExternalURL = getEnv("REVERSE_PROXY_EXTERNAL_URL", cfg.ReverseProxy.ExternalURL)
 
