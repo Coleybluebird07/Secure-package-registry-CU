@@ -112,6 +112,54 @@ func (m *mockQuerier) GetSucceededCollectionTask(context.Context, coredb.GetSucc
 	panic("not used")
 }
 
+func (m *mockQuerier) InsertRebuildTask(context.Context, coredb.InsertRebuildTaskParams) (coredb.InsertRebuildTaskRow, error) {
+	panic("not used")
+}
+
+func (m *mockQuerier) HasActiveRebuildTask(context.Context, coredb.HasActiveRebuildTaskParams) (bool, error) {
+	panic("not used")
+}
+
+func (m *mockQuerier) UpdateRebuildTaskStatus(context.Context, coredb.UpdateRebuildTaskStatusParams) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) UpdateRebuildTaskRunning(context.Context, int32) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) UpdateRebuildTaskHeartbeat(context.Context, int32) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) UpdateRebuildTaskSucceeded(context.Context, coredb.UpdateRebuildTaskSucceededParams) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) UpdateRebuildTaskUnavailable(context.Context, coredb.UpdateRebuildTaskUnavailableParams) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) UpdateRebuildTaskFailed(context.Context, coredb.UpdateRebuildTaskFailedParams) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) ResetRebuildTask(context.Context, int32) error {
+	panic("not used")
+}
+
+func (m *mockQuerier) GetRebuildTask(context.Context, int32) (coredb.RebuildTask, error) {
+	panic("not used")
+}
+
+func (m *mockQuerier) ListRebuildTasks(context.Context, coredb.ListRebuildTasksParams) ([]coredb.ListRebuildTasksRow, error) {
+	panic("not used")
+}
+
+func (m *mockQuerier) GetRebuildTaskForPackageVersion(context.Context, coredb.GetRebuildTaskForPackageVersionParams) (coredb.RebuildTask, error) {
+	panic("not used")
+}
+
 func (m *mockQuerier) GetAPIKeyOwner(ctx context.Context, key string) (string, error) {
 	panic("not used")
 }

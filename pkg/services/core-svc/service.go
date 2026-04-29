@@ -1,7 +1,7 @@
 // Package coresvc implements the core API service that serves external and internal HTTP endpoints.
-// It also consumes spr.package.updated messages to create collection tasks and publish
-// spr.collection.requested messages, and consumes spr.collection.completed messages to
-// update collection task status.
+// It also consumes spr.package.updated messages to create collection and rebuild tasks,
+// publishes spr.collection.requested and spr.rebuild.requested messages, and consumes
+// spr.collection.completed and spr.rebuild.completed messages to update task status.
 package coresvc
 
 import (
@@ -33,7 +33,7 @@ func init() {
 }
 
 // Start runs the core-svc: HTTP servers, the spr.package.updated consumer,
-// and the spr.collection.completed consumer.
+// the spr.collection.completed consumer, and the spr.rebuild.completed consumer.
 // Blocks until ctx is cancelled, then gracefully shuts down.
 func Start(ctx context.Context, deps *services.Deps) error {
 	db := pkgdb.NewClient(deps.Pool)
@@ -71,7 +71,7 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("subscribing to package updates: %w", err)
 	}
 
-	// Subscriber for spr.collection.completed (separate AMQP connection per convention).
+	// Subscriber for spr.collection.completed.
 	completedSub, err := amqp.NewSubscriber(
 		amqp.NewDurableQueueConfig(deps.Config.RabbitMQURL),
 		watermill.NewStdLogger(false, false),
@@ -90,6 +90,25 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("subscribing to collection completions: %w", err)
 	}
 
+	// Subscriber for spr.rebuild.completed.
+	rebuildCompletedSub, err := amqp.NewSubscriber(
+		amqp.NewDurableQueueConfig(deps.Config.RabbitMQURL),
+		watermill.NewStdLogger(false, false),
+	)
+	if err != nil {
+		return fmt.Errorf("creating rebuild-completed subscriber: %w", err)
+	}
+	defer func() {
+		if cerr := rebuildCompletedSub.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close rebuild-completed subscriber")
+		}
+	}()
+
+	rebuildCompletedCh, err := rebuildCompletedSub.Subscribe(ctx, "spr.rebuild.completed")
+	if err != nil {
+		return fmt.Errorf("subscribing to rebuild completions: %w", err)
+	}
+
 	// Run consumers in separate goroutines; report fatal errors via channels.
 	updatedErr := make(chan error, 1)
 	go func() {
@@ -102,6 +121,13 @@ func Start(ctx context.Context, deps *services.Deps) error {
 	go func() {
 		if err := consumeCollectionCompleted(ctx, queries, completedCh); err != nil {
 			completedErr <- err
+		}
+	}()
+
+	rebuildCompletedErr := make(chan error, 1)
+	go func() {
+		if err := consumeRebuildCompleted(ctx, queries, rebuildCompletedCh); err != nil {
+			rebuildCompletedErr <- err
 		}
 	}()
 
@@ -139,6 +165,8 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("package-updated consumer: %w", err)
 	case err := <-completedErr:
 		return fmt.Errorf("collection-completed consumer: %w", err)
+	case err := <-rebuildCompletedErr:
+		return fmt.Errorf("rebuild-completed consumer: %w", err)
 	}
 
 	shutdownCtx := context.Background()
@@ -160,9 +188,9 @@ func Start(ctx context.Context, deps *services.Deps) error {
 
 // consumePackageUpdated reads spr.package.updated messages and, for each one:
 //  1. Looks up the package by ecosystem+identifier.
-//  2. Upserts the package version (source_url left null — the poller doesn't have it).
-//  3. Checks whether an active collection task already exists (dedup).
-//  4. If not, inserts a pending collection task and publishes spr.collection.requested.
+//  2. Upserts the package version.
+//  3. Creates and publishes a behavioral collection task.
+//  4. Creates and publishes a rebuild verification task.
 func consumePackageUpdated(
 	ctx context.Context,
 	queries *coredb.Queries,
@@ -245,43 +273,106 @@ func handlePackageUpdated(
 	}
 	if active {
 		l.Debug().Msg("Active collection task already exists, skipping")
+	} else {
+		// Insert the collection task. ON CONFLICT DO NOTHING handles races.
+		task, err := queries.InsertCollectionTask(ctx, coredb.InsertCollectionTaskParams{
+			PackageVersionID: pvID,
+			Source:           "npm",
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Conflict — another consumer beat us to it.
+			l.Debug().Msg("Collection task already exists (conflict), skipping")
+		} else if err != nil {
+			return fmt.Errorf("inserting collection task: %w", err)
+		} else {
+			// Publish spr.collection.requested for be-runner to pick up.
+			collReq := messages.CollectionRequested{
+				TaskID:     task.ID,
+				Ecosystem:  upd.Ecosystem,
+				Identifier: upd.Identifier,
+				Version:    upd.Version,
+			}
+			var buf bytes.Buffer
+			if err := gob.NewEncoder(&buf).Encode(collReq); err != nil {
+				return fmt.Errorf("encoding collection-requested message: %w", err)
+			}
+			wmMsg := message.NewMessage(watermill.NewUUID(), buf.Bytes())
+			if err := publisher.Publish("spr.collection.requested", wmMsg); err != nil {
+				// Log but don't fail — the task is persisted; a retry mechanism can
+				// re-publish later.
+				l.Error().Err(err).Msg("Failed to publish collection-requested (task persisted)")
+			} else {
+				l.Info().Int32("task_id", task.ID).Msg("Created collection task and published collection request")
+			}
+		}
+	}
+
+	if err := createAndPublishRebuildTask(ctx, queries, publisher, pvID, upd); err != nil {
+		l.Error().Err(err).Msg("Failed to create or publish rebuild task")
+	}
+
+	l.Info().Msg("Handled package update")
+	return nil
+}
+
+func createAndPublishRebuildTask(
+	ctx context.Context,
+	queries *coredb.Queries,
+	publisher message.Publisher,
+	pvID int32,
+	upd messages.PackageUpdated,
+) error {
+	l := log.With().
+		Str("ecosystem", upd.Ecosystem).
+		Str("package", upd.Identifier).
+		Str("version", upd.Version).
+		Str("source", "oss-rebuild").
+		Logger()
+
+	active, err := queries.HasActiveRebuildTask(ctx, coredb.HasActiveRebuildTaskParams{
+		PackageVersionID: pvID,
+		Source:           "oss-rebuild",
+	})
+	if err != nil {
+		return fmt.Errorf("checking active rebuild task: %w", err)
+	}
+	if active {
+		l.Debug().Msg("Active rebuild task already exists, skipping")
 		return nil
 	}
 
-	// Insert the collection task. ON CONFLICT DO NOTHING handles races.
-	task, err := queries.InsertCollectionTask(ctx, coredb.InsertCollectionTaskParams{
+	task, err := queries.InsertRebuildTask(ctx, coredb.InsertRebuildTaskParams{
 		PackageVersionID: pvID,
-		Source:           "npm",
+		Source:           "oss-rebuild",
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Conflict — another consumer beat us to it.
-		l.Debug().Msg("Collection task already exists (conflict), skipping")
+		l.Debug().Msg("Rebuild task already exists (conflict), skipping")
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("inserting collection task: %w", err)
+		return fmt.Errorf("inserting rebuild task: %w", err)
 	}
 
-	// Publish spr.collection.requested for be-runner to pick up.
-	collReq := messages.CollectionRequested{
+	req := messages.RebuildRequested{
 		TaskID:     task.ID,
 		Ecosystem:  upd.Ecosystem,
 		Identifier: upd.Identifier,
 		Version:    upd.Version,
+		Source:     "oss-rebuild",
 	}
+
 	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(collReq); err != nil {
-		return fmt.Errorf("encoding collection-requested message: %w", err)
+	if err := gob.NewEncoder(&buf).Encode(req); err != nil {
+		return fmt.Errorf("encoding rebuild-requested message: %w", err)
 	}
+
 	wmMsg := message.NewMessage(watermill.NewUUID(), buf.Bytes())
-	if err := publisher.Publish("spr.collection.requested", wmMsg); err != nil {
-		// Log but don't fail — the task is persisted; a retry mechanism can
-		// re-publish later.
-		l.Error().Err(err).Msg("Failed to publish collection-requested (task persisted)")
+	if err := publisher.Publish("spr.rebuild.requested", wmMsg); err != nil {
+		l.Error().Err(err).Msg("Failed to publish rebuild-requested (task persisted)")
 		return nil
 	}
 
-	l.Info().Msg("Created collection task and published collection request")
+	l.Info().Int32("task_id", task.ID).Msg("Created rebuild task and published rebuild request")
 	return nil
 }
 
@@ -356,4 +447,109 @@ func handleCollectionCompleted(
 	}
 
 	return nil
+}
+
+// consumeRebuildCompleted reads spr.rebuild.completed messages from rebuild-worker
+// and updates rebuild task status accordingly.
+func consumeRebuildCompleted(
+	ctx context.Context,
+	queries *coredb.Queries,
+	messagesCh <-chan *message.Message,
+) error {
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("Stopping rebuild-completed consumer")
+			return nil
+		case msg, ok := <-messagesCh:
+			if !ok {
+				log.Info().Msg("Rebuild-completed subscription closed")
+				return nil
+			}
+			if err := handleRebuildCompleted(ctx, queries, msg); err != nil {
+				log.Error().Err(err).Msg("Failed to handle rebuild-completed message")
+				msg.Nack()
+				continue
+			}
+			msg.Ack()
+		}
+	}
+}
+
+func handleRebuildCompleted(
+	ctx context.Context,
+	queries *coredb.Queries,
+	msg *message.Message,
+) error {
+	var completed messages.RebuildCompleted
+	if err := gob.NewDecoder(bytes.NewReader(msg.Payload)).Decode(&completed); err != nil {
+		return fmt.Errorf("decoding rebuild-completed message: %w", err)
+	}
+
+	l := log.With().
+		Int32("task_id", completed.TaskID).
+		Str("ecosystem", completed.Ecosystem).
+		Str("package", completed.Identifier).
+		Str("version", completed.Version).
+		Str("source", completed.Source).
+		Logger()
+
+	if completed.Success {
+		err := queries.UpdateRebuildTaskSucceeded(ctx, coredb.UpdateRebuildTaskSucceededParams{
+			ID:                     completed.TaskID,
+			Matched:                pgtype.Bool{Bool: completed.Matched, Valid: true},
+			OfficialArtifactBucket: textOrNull(completed.OfficialArtifactBucket),
+			OfficialArtifactKey:    textOrNull(completed.OfficialArtifactKey),
+			RebuiltArtifactBucket:  textOrNull(completed.RebuiltArtifactBucket),
+			RebuiltArtifactKey:     textOrNull(completed.RebuiltArtifactKey),
+			DiffoscopeBucket:       textOrNull(completed.DiffoscopeBucket),
+			DiffoscopeKey:          textOrNull(completed.DiffoscopeKey),
+			LogsBucket:             textOrNull(completed.LogsBucket),
+			LogsKey:                textOrNull(completed.LogsKey),
+			MetadataBucket:         textOrNull(completed.MetadataBucket),
+			MetadataKey:            textOrNull(completed.MetadataKey),
+		})
+		if err != nil {
+			return fmt.Errorf("marking rebuild task %d succeeded: %w", completed.TaskID, err)
+		}
+		l.Info().
+			Bool("matched", completed.Matched).
+			Msg("Rebuild task succeeded")
+		return nil
+	}
+
+	if completed.Unavailable {
+		err := queries.UpdateRebuildTaskUnavailable(ctx, coredb.UpdateRebuildTaskUnavailableParams{
+			ID:            completed.TaskID,
+			FailureReason: textOrNull(completed.FailureReason),
+		})
+		if err != nil {
+			return fmt.Errorf("marking rebuild task %d unavailable: %w", completed.TaskID, err)
+		}
+		l.Warn().
+			Str("reason", completed.FailureReason).
+			Msg("Rebuild task unavailable")
+		return nil
+	}
+
+	err := queries.UpdateRebuildTaskFailed(ctx, coredb.UpdateRebuildTaskFailedParams{
+		ID:            completed.TaskID,
+		FailureReason: textOrNull(completed.FailureReason),
+	})
+	if err != nil {
+		return fmt.Errorf("marking rebuild task %d failed: %w", completed.TaskID, err)
+	}
+
+	l.Warn().
+		Str("reason", completed.FailureReason).
+		Msg("Rebuild task failed")
+
+	return nil
+}
+
+func textOrNull(value string) pgtype.Text {
+	if value == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: value, Valid: true}
 }
