@@ -1,29 +1,38 @@
 # Build stage
-FROM golang:1.25.6-alpine AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /app
 
-# Install dependencies
+ENV GOTOOLCHAIN=auto
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OSS Rebuild CLI.
+RUN go install github.com/google/oss-rebuild/cmd/oss-rebuild@latest
+
+# Install project dependencies.
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Copy source code.
 COPY . .
 
-# Build binary
+# Build SPR binary.
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/spr ./cmd/spr
 
 # Runtime stage
 FROM debian:bookworm-slim
 
-# Install runtime tools:
-# - ca-certificates for HTTPS calls
-# - diffoscope for artifact diffs
-# - tar/gzip/xz-utils/unzip/file for archive inspection support
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         diffoscope-minimal \
+        docker.io \
         file \
         gzip \
         tar \
@@ -31,22 +40,19 @@ RUN apt-get update \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin spr
 
 WORKDIR /app
 
-# Copy migrations
 COPY --from=builder /app/infra/migrations ./infra/migrations
-
-# Copy binary from builder
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/spr ./spr
+COPY --from=builder /go/bin/oss-rebuild /usr/local/bin/oss-rebuild
 
-# Set ownership
-RUN chown -R spr:spr ./spr ./infra
+RUN chown -R spr:spr ./spr ./infra ./scripts \
+    && chmod +x ./scripts/oss-rebuild-npm.sh \
+    && chmod +x /usr/local/bin/oss-rebuild
 
-# Switch to non-root user
 USER spr
 
-# Run the service
 ENTRYPOINT ["./spr"]
