@@ -185,6 +185,7 @@ services:
     build:
       context: .
       dockerfile: cmd/spr/Containerfile
+    user: root
     depends_on:
       core_db:
         condition: service_healthy

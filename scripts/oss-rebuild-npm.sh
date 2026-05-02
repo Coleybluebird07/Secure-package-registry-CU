@@ -28,13 +28,13 @@ fi
 
 echo "Using OSS Rebuild binary: ${OSS_REBUILD_BIN}"
 
-if ! "$OSS_REBUILD_BIN" list npm "$SPR_PACKAGE" --verify=false | grep -Fxq "$SPR_VERSION"; then
+if ! "$OSS_REBUILD_BIN" list npm "$SPR_PACKAGE" | grep -Eq "^npm/${SPR_PACKAGE}/${SPR_VERSION}/"; then
   echo "OSS Rebuild has no rebuild record for npm ${SPR_PACKAGE}@${SPR_VERSION}" >&2
   exit 10
 fi
 
 echo "Fetching OSS Rebuild Dockerfile"
-"$OSS_REBUILD_BIN" get npm "$SPR_PACKAGE" "$SPR_VERSION" --verify=false --output=dockerfile > "$workdir/Dockerfile"
+"$OSS_REBUILD_BIN" get npm "$SPR_PACKAGE" "$SPR_VERSION" --output=dockerfile > "$workdir/Dockerfile"
 
 echo "Generated Dockerfile:"
 sed -n "1,220p" "$workdir/Dockerfile"
