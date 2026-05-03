@@ -11,6 +11,8 @@ import type {
 	RebuildArtifactKind,
 	RebuildTaskDetail,
 	SearchResult,
+	TriggerRebuildRequest,
+	TriggerRebuildResponse,
 	TriggerScanRequest,
 	TriggerScanResponse,
 } from "$lib/types/api.js";
@@ -175,6 +177,20 @@ export const rebuildAPI = {
 			: `${API_BASE}/admin/rebuild-tasks`;
 
 		return fetchJSON(url);
+	},
+
+	trigger: (
+		ecosystem: string,
+		identifier: string,
+		data: TriggerRebuildRequest,
+	): Promise<TriggerRebuildResponse> => {
+		return fetchJSON(
+			`${API_BASE}/admin/packages/${encodeURIComponent(ecosystem)}/${encodeURIComponent(identifier)}/rebuild`,
+			{
+				body: JSON.stringify(data),
+				method: "POST",
+			},
+		);
 	},
 };
 
