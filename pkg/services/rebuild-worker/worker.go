@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -273,23 +274,32 @@ func handleRebuildRequest(
 	completed.MetadataKey = metadataKey
 
 	if !matched {
-		diffBytes, err := runDiffoscope(ctx, deps.Config.Rebuild.DiffoscopeCmd, officialPath, rebuiltPath, diffPath)
-		if err != nil {
-			l.Warn().Err(err).Msg("Diffoscope failed; rebuild mismatch will still be recorded")
-			diffBytes = []byte(fmt.Sprintf("diffoscope failed: %v\n", err))
-		}
+		diffBytes, fallbackUsed := buildDiffoscopeReport(
+			ctx,
+			deps.Config.Rebuild.DiffoscopeCmd,
+			req,
+			officialPath,
+			rebuiltPath,
+			diffPath,
+			officialHash,
+			rebuiltHash,
+		)
+
 		diffKey := baseKey + "/diffoscope.html"
-		contentType := "text/html"
-		if !strings.Contains(string(diffBytes[:min(len(diffBytes), 128)]), "<") {
-			contentType = "text/plain"
-		}
-		if err := minioClient.PutObject(ctx, diffKey, diffBytes, contentType); err != nil {
+		if err := minioClient.PutObject(ctx, diffKey, diffBytes, "text/html"); err != nil {
 			completed.FailureReason = fmt.Sprintf("uploading diffoscope report: %v", err)
 			completed.Success = false
 			return completed
 		}
+
 		completed.DiffoscopeBucket = minioClient.Bucket()
 		completed.DiffoscopeKey = diffKey
+
+		if fallbackUsed {
+			l.Warn().Msg("Stored fallback diffoscope report for rebuild mismatch")
+		} else {
+			l.Info().Msg("Stored diffoscope report for rebuild mismatch")
+		}
 	}
 
 	l.Info().
@@ -430,23 +440,187 @@ func runOSSRebuild(
 	return logText, nil
 }
 
-func runDiffoscope(ctx context.Context, diffoscopeCmd, officialPath, rebuiltPath, outputPath string) ([]byte, error) {
+func buildDiffoscopeReport(
+	ctx context.Context,
+	diffoscopeCmd string,
+	req messages.RebuildRequested,
+	officialPath string,
+	rebuiltPath string,
+	outputPath string,
+	officialHash string,
+	rebuiltHash string,
+) ([]byte, bool) {
 	if diffoscopeCmd == "" {
 		diffoscopeCmd = "diffoscope"
 	}
 
-	cmd := exec.CommandContext(ctx, diffoscopeCmd, "--html", outputPath, officialPath, rebuiltPath)
+	args := []string{"--html", outputPath, officialPath, rebuiltPath}
+	cmd := exec.CommandContext(ctx, diffoscopeCmd, args...)
 	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return output, fmt.Errorf("running diffoscope: %w: %s", err, strings.TrimSpace(string(output)))
+
+	if err == nil {
+		data, readErr := os.ReadFile(outputPath)
+		if readErr == nil && len(data) > 0 {
+			return data, false
+		}
+
+		fallback := fallbackDiffoscopeHTML(
+			req,
+			diffoscopeCmd,
+			args,
+			officialHash,
+			rebuiltHash,
+			output,
+			fmt.Errorf("diffoscope exited successfully but output report was empty or unreadable: %w", readErr),
+		)
+		return fallback, true
 	}
 
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		return output, fmt.Errorf("reading diffoscope output: %w", err)
+	fallback := fallbackDiffoscopeHTML(
+		req,
+		diffoscopeCmd,
+		args,
+		officialHash,
+		rebuiltHash,
+		output,
+		err,
+	)
+	return fallback, true
+}
+
+func fallbackDiffoscopeHTML(
+	req messages.RebuildRequested,
+	diffoscopeCmd string,
+	args []string,
+	officialHash string,
+	rebuiltHash string,
+	output []byte,
+	err error,
+) []byte {
+	command := diffoscopeCmd + " " + strings.Join(args, " ")
+	stdoutStderr := strings.TrimSpace(string(output))
+	if stdoutStderr == "" {
+		stdoutStderr = "(no output captured)"
 	}
 
-	return data, nil
+	errText := "(no error)"
+	if err != nil {
+		errText = err.Error()
+	}
+
+	htmlText := fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Diffoscope fallback report</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      margin: 2rem;
+      color: #111827;
+      background: #f9fafb;
+    }
+    .card {
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 1.5rem;
+    }
+    h2 {
+      font-size: 1rem;
+      margin-top: 0;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 0.5rem 1rem;
+    }
+    dt {
+      font-weight: 700;
+    }
+    dd {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      word-break: break-all;
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #111827;
+      color: #f9fafb;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      overflow: auto;
+    }
+    .warning {
+      color: #92400e;
+      background: #fffbeb;
+      border-color: #fde68a;
+    }
+  </style>
+</head>
+<body>
+  <div class="card warning">
+    <h1>Diffoscope fallback report</h1>
+    <p>The artifacts did not match, but diffoscope did not produce a normal HTML report. This fallback report preserves the package details, hashes, command, failure reason, and captured diffoscope output.</p>
+  </div>
+
+  <div class="card">
+    <h2>Package</h2>
+    <dl>
+      <dt>Ecosystem</dt><dd>%s</dd>
+      <dt>Package</dt><dd>%s</dd>
+      <dt>Version</dt><dd>%s</dd>
+      <dt>Source</dt><dd>%s</dd>
+      <dt>Task ID</dt><dd>%d</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Artifact hashes</h2>
+    <dl>
+      <dt>Official SHA256</dt><dd>%s</dd>
+      <dt>Rebuilt SHA256</dt><dd>%s</dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Diffoscope command</h2>
+    <pre>%s</pre>
+  </div>
+
+  <div class="card">
+    <h2>Failure reason</h2>
+    <pre>%s</pre>
+  </div>
+
+  <div class="card">
+    <h2>Captured stdout/stderr</h2>
+    <pre>%s</pre>
+  </div>
+</body>
+</html>
+`,
+		html.EscapeString(req.Ecosystem),
+		html.EscapeString(req.Identifier),
+		html.EscapeString(req.Version),
+		html.EscapeString(req.Source),
+		req.TaskID,
+		html.EscapeString(officialHash),
+		html.EscapeString(rebuiltHash),
+		html.EscapeString(command),
+		html.EscapeString(errText),
+		html.EscapeString(stdoutStderr),
+	)
+
+	return []byte(htmlText)
 }
 
 func storeLogs(ctx context.Context, minioClient *sprminio.Client, req messages.RebuildRequested, logPath string, completed *messages.RebuildCompleted) {
