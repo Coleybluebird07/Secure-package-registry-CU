@@ -91,6 +91,22 @@ export interface RebuildTaskDetail {
 	updated_at: string;
 }
 
+export interface TriggerRebuildRequest {
+	version?: string;
+	source?: string;
+}
+
+export interface TriggerRebuildResponse {
+	task_id: number;
+	identifier: string;
+	ecosystem: string;
+	version: string;
+	source: string;
+	status: string;
+	retried: boolean;
+	already_active: boolean;
+}
+
 export interface ListPackagesResponse {
 	items: Package[];
 }

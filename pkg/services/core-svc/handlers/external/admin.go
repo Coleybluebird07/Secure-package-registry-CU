@@ -50,6 +50,7 @@ func NewAdminHandler(db coredb.Querier, publisher message.Publisher, minio *sprm
 	r.Get("/packages/{ecosystem}/{identifier}/behavior", h.GetBehavior)
 	r.Get("/packages/{ecosystem}/{identifier}/behavior/raw", h.GetBehaviorRaw)
 	r.Get("/packages/{ecosystem}/{identifier}/rebuild", h.GetRebuildForPackage)
+	r.Post("/packages/{ecosystem}/{identifier}/rebuild", h.TriggerRebuild)
 
 	r.Get("/tasks", h.ListTasks)
 	r.Get("/tasks/{taskID}/artifact", h.DownloadArtifact)
@@ -332,6 +333,194 @@ func (h *AdminHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 		"ecosystem":  ecoStr,
 		"version":    version,
 		"status":     "pending",
+	})
+}
+
+type TriggerRebuildRequest struct {
+	Version string `json:"version"`
+	Source  string `json:"source"`
+}
+
+type TriggerRebuildResponse struct {
+	TaskID        int32  `json:"task_id"`
+	Identifier    string `json:"identifier"`
+	Ecosystem     string `json:"ecosystem"`
+	Version       string `json:"version"`
+	Source        string `json:"source"`
+	Status        string `json:"status"`
+	Retried       bool   `json:"retried"`
+	AlreadyActive bool   `json:"already_active"`
+}
+
+// TriggerRebuild manually creates or retries a rebuild verification task for a package version.
+func (h *AdminHandler) TriggerRebuild(w http.ResponseWriter, r *http.Request) {
+	ecoStr := chi.URLParam(r, "ecosystem")
+	identifier, _ := url.PathUnescape(chi.URLParam(r, "identifier"))
+
+	ecosystem := coredb.Ecosystem(ecoStr)
+	if !validEcosystem(ecosystem) {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid ecosystem: " + ecoStr})
+		return
+	}
+
+	ctx := r.Context()
+
+	var req TriggerRebuildRequest
+	_ = render.DecodeJSON(r.Body, &req)
+
+	source := req.Source
+	if source == "" {
+		source = "oss-rebuild"
+	}
+
+	pkg, err := h.db.GetPackageByEcosystemAndIdentifier(ctx, coredb.GetPackageByEcosystemAndIdentifierParams{
+		Ecosystem:  ecosystem,
+		Identifier: identifier,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		render.Status(r, http.StatusNotFound)
+		render.JSON(w, r, map[string]string{"error": "package not found"})
+		return
+	}
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Msg("Failed to look up package")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to look up package"})
+		return
+	}
+
+	version := req.Version
+	if version == "" {
+		if !pkg.LatestVersion.Valid {
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, map[string]string{"error": "no version specified and package has no known latest version"})
+			return
+		}
+		version = pkg.LatestVersion.String
+	}
+
+	pvID, err := h.db.InsertPackageVersion(ctx, coredb.InsertPackageVersionParams{
+		PackageID: pkg.ID,
+		Version:   version,
+		SourceUrl: pgtype.Text{},
+	})
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Str("version", version).Msg("Failed to upsert package version")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to upsert package version"})
+		return
+	}
+
+	task, err := h.db.InsertRebuildTask(ctx, coredb.InsertRebuildTaskParams{
+		PackageVersionID: pvID,
+		Source:           source,
+	})
+
+	retried := false
+	alreadyActive := false
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, getErr := h.db.GetRebuildTaskForPackageVersion(ctx, coredb.GetRebuildTaskForPackageVersionParams{
+			Ecosystem:  ecosystem,
+			Identifier: identifier,
+			Version:    version,
+			Source:     source,
+		})
+		if getErr != nil {
+			h.log.Error().Err(getErr).Str("identifier", identifier).Str("version", version).Msg("Failed to get existing rebuild task")
+			render.Status(r, http.StatusInternalServerError)
+			render.JSON(w, r, map[string]string{"error": "failed to get existing rebuild task"})
+			return
+		}
+
+		switch existing.Status {
+		case coredb.RebuildTaskStatusPending, coredb.RebuildTaskStatusRunning:
+			alreadyActive = true
+			render.Status(r, http.StatusOK)
+			render.JSON(w, r, TriggerRebuildResponse{
+				TaskID:        existing.ID,
+				Identifier:    identifier,
+				Ecosystem:     ecoStr,
+				Version:       version,
+				Source:        source,
+				Status:        string(existing.Status),
+				AlreadyActive: alreadyActive,
+			})
+			return
+
+		case coredb.RebuildTaskStatusFailed, coredb.RebuildTaskStatusCancelled, coredb.RebuildTaskStatusUnavailable:
+			if resetErr := h.db.ResetRebuildTask(ctx, existing.ID); resetErr != nil {
+				h.log.Error().Err(resetErr).Int32("task_id", existing.ID).Msg("Failed to reset rebuild task")
+				render.Status(r, http.StatusInternalServerError)
+				render.JSON(w, r, map[string]string{"error": "failed to reset rebuild task"})
+				return
+			}
+
+			task = coredb.InsertRebuildTaskRow{
+				ID:               existing.ID,
+				PackageVersionID: existing.PackageVersionID,
+				Source:           existing.Source,
+				Status:           coredb.RebuildTaskStatusPending,
+				CreatedAt:        existing.CreatedAt,
+			}
+			retried = true
+
+		default:
+			render.Status(r, http.StatusConflict)
+			render.JSON(w, r, map[string]string{"error": "rebuild task already exists and cannot be retried from its current state"})
+			return
+		}
+	} else if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Str("version", version).Msg("Failed to insert rebuild task")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to create rebuild task"})
+		return
+	}
+
+	rebuildReq := messages.RebuildRequested{
+		TaskID:     task.ID,
+		Ecosystem:  ecoStr,
+		Identifier: identifier,
+		Version:    version,
+		Source:     source,
+	}
+
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(rebuildReq); err != nil {
+		h.log.Error().Err(err).Msg("Failed to encode rebuild request")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to encode rebuild request"})
+		return
+	}
+
+	if err := h.publisher.Publish("spr.rebuild.requested", message.NewMessage(watermill.NewUUID(), buf.Bytes())); err != nil {
+		h.log.Error().Err(err).Msg("Failed to publish rebuild request")
+	}
+
+	h.log.Info().
+		Str("package", identifier).
+		Str("version", version).
+		Str("source", source).
+		Int32("task_id", task.ID).
+		Bool("retried", retried).
+		Msg("Triggered rebuild via admin API")
+
+	status := http.StatusCreated
+	if retried {
+		status = http.StatusOK
+	}
+
+	render.Status(r, status)
+	render.JSON(w, r, TriggerRebuildResponse{
+		TaskID:        task.ID,
+		Identifier:    identifier,
+		Ecosystem:     ecoStr,
+		Version:       version,
+		Source:        source,
+		Status:        "pending",
+		Retried:       retried,
+		AlreadyActive: alreadyActive,
 	})
 }
 

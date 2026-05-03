@@ -11,6 +11,7 @@
     FileText,
     ScrollText,
     Archive,
+    RotateCcw,
   } from "lucide-svelte";
 
   let ecosystem = $derived($page.params.ecosystem ?? "");
@@ -18,6 +19,9 @@
 
   let packageVersion = $state<PackageVersion | null>(null);
   let rebuildByVersion = $state<Record<string, RebuildTaskDetail | null>>({});
+  let rebuildingByVersion = $state<Record<string, boolean>>({});
+  let rebuildErrorByVersion = $state<Record<string, string | null>>({});
+  let rebuildSuccessByVersion = $state<Record<string, string | null>>({});
   let loading = $state(false);
   let error = $state<string | null>(null);
   let scanning = $state(false);
@@ -36,6 +40,20 @@
   function rebuildStatusClass(task: RebuildTaskDetail | null | undefined) {
     const label = rebuildStatusLabel(task);
     return `rebuild-${label.replace(" ", "-")}`;
+  }
+
+  function canTriggerRebuild(task: RebuildTaskDetail | null | undefined) {
+    if (!task) return true;
+    return ["failed", "cancelled", "unavailable"].includes(task.status);
+  }
+
+  function rebuildActionLabel(task: RebuildTaskDetail | null | undefined) {
+    if (!task) return "Run Rebuild Check";
+    if (["failed", "cancelled", "unavailable"].includes(task.status))
+      return "Retry Rebuild";
+    if (task.status === "pending" || task.status === "running")
+      return "Rebuild Running";
+    return "Rebuild Checked";
   }
 
   async function loadRebuildForVersion(version: string) {
@@ -90,6 +108,54 @@
       }
     } finally {
       scanning = false;
+    }
+  }
+
+  async function handleRebuild(version: string) {
+    rebuildingByVersion = {
+      ...rebuildingByVersion,
+      [version]: true,
+    };
+    rebuildErrorByVersion = {
+      ...rebuildErrorByVersion,
+      [version]: null,
+    };
+    rebuildSuccessByVersion = {
+      ...rebuildSuccessByVersion,
+      [version]: null,
+    };
+
+    try {
+      const response = await rebuildAPI.trigger(ecosystem, name, {
+        version,
+        source: "oss-rebuild",
+      });
+
+      let message = `Rebuild check queued for ${response.version} (Task ID: ${response.task_id})`;
+      if (response.retried) {
+        message = `Rebuild check retried for ${response.version} (Task ID: ${response.task_id})`;
+      }
+      if (response.already_active) {
+        message = `A rebuild check is already ${response.status} for ${response.version}`;
+      }
+
+      rebuildSuccessByVersion = {
+        ...rebuildSuccessByVersion,
+        [version]: message,
+      };
+
+      await loadRebuildForVersion(version);
+    } catch (e) {
+      rebuildErrorByVersion = {
+        ...rebuildErrorByVersion,
+        [version]:
+          e instanceof Error ? e.message : "Failed to trigger rebuild check",
+      };
+    } finally {
+      rebuildingByVersion = {
+        ...rebuildingByVersion,
+        [version]: false,
+      };
     }
   }
 
@@ -171,6 +237,7 @@
         <tbody>
           {#each packageVersion.versions as version}
             {@const rebuild = rebuildByVersion[version]}
+            {@const rebuilding = rebuildingByVersion[version]}
             <tr>
               <td class="cell-version">
                 {version}
@@ -252,18 +319,45 @@
                     No rebuild verification has been recorded for this version.
                   </span>
                 {/if}
+
+                {#if rebuildErrorByVersion[version]}
+                  <div class="inline-error">
+                    {rebuildErrorByVersion[version]}
+                  </div>
+                {/if}
+
+                {#if rebuildSuccessByVersion[version]}
+                  <div class="inline-success">
+                    {rebuildSuccessByVersion[version]}
+                  </div>
+                {/if}
               </td>
 
               <td class="col-actions">
-                <a
-                  href="/admin/packages/{ecosystem}/{encodeURIComponent(
-                    name,
-                  )}/behavior?version={version}"
-                  class="behavior-link"
-                >
-                  <Activity class="icon-xs" />
-                  View Behavior
-                </a>
+                <div class="action-stack">
+                  <button
+                    class="btn-secondary"
+                    disabled={rebuilding || !canTriggerRebuild(rebuild)}
+                    onclick={() => handleRebuild(version)}
+                  >
+                    {#if rebuilding}
+                      <Loader2 class="icon-spin-small" />
+                    {:else}
+                      <RotateCcw class="icon-xs" />
+                    {/if}
+                    {rebuildActionLabel(rebuild)}
+                  </button>
+
+                  <a
+                    href="/admin/packages/{ecosystem}/{encodeURIComponent(
+                      name,
+                    )}/behavior?version={version}"
+                    class="behavior-link"
+                  >
+                    <Activity class="icon-xs" />
+                    View Behavior
+                  </a>
+                </div>
               </td>
             </tr>
           {:else}
@@ -342,40 +436,65 @@
     margin-bottom: 1rem;
   }
 
-  .btn-primary {
+  .btn-primary,
+  .btn-secondary {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
     padding: 0.5rem 1rem;
     font-size: 0.875rem;
     font-weight: 500;
-    color: #fff;
-    background: var(--accent);
-    border: none;
     border-radius: 6px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
     cursor: pointer;
-    transition: background 0.15s;
+    transition:
+      background 0.15s,
+      color 0.15s;
+  }
+
+  .btn-primary {
+    color: #fff;
+    background: var(--accent);
+    border: none;
   }
 
   .btn-primary:hover {
     background: var(--accent-hover);
   }
 
-  .btn-primary:disabled {
+  .btn-secondary {
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .btn-secondary:hover {
+    color: var(--accent);
+    background: var(--bg-primary);
+  }
+
+  .btn-primary:disabled,
+  .btn-secondary:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .btn-primary :global(.icon-spin) {
-    width: 1rem;
-    height: 1rem;
-    animation: spin 1s linear infinite;
-  }
-
+  .btn-primary :global(.icon-spin),
   .btn-primary :global(.icon-sm) {
     width: 1rem;
     height: 1rem;
+  }
+
+  .btn-secondary :global(.icon-xs),
+  .btn-secondary :global(.icon-spin-small) {
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  .btn-primary :global(.icon-spin),
+  .btn-secondary :global(.icon-spin-small) {
+    animation: spin 1s linear infinite;
   }
 
   @keyframes spin {
@@ -509,6 +628,13 @@
     text-align: right;
   }
 
+  .action-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+
   .behavior-link,
   .artifact-link {
     display: inline-flex;
@@ -601,6 +727,20 @@
     flex-wrap: wrap;
     gap: 0.375rem;
     margin-top: 0.5rem;
+  }
+
+  .inline-error,
+  .inline-success {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  .inline-error {
+    color: #dc2626;
+  }
+
+  .inline-success {
+    color: #15803d;
   }
 
   .cell-empty {
