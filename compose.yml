@@ -27,15 +27,17 @@ services:
     volumes:
       # Uncomment when necessary. No persistence necessary for testing phase
       # - ./data/gitea:/data:Z
-      - ./infra/gitea-custom/:/data/gitea/custom:ro
+      - ./infra/gitea-custom/conf/app.ini:/tmp/gitea-app.ini:ro
       - ./infra/gitea/setup.sh:/gitea-setup.sh:ro
     ports:
       - "127.0.0.1:10005:3000" # Gitea web UI (3rd party internal)
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - | # Will run every time on startup but commands are idempotent so no worries
+      - |
         apk update
         apk add valkey-cli jq
+        mkdir -p /data/gitea/custom/conf
+        cp /tmp/gitea-app.ini /data/gitea/custom/conf/app.ini
         cat /gitea-setup.sh >> /etc/s6/gitea/setup
         /usr/bin/entrypoint /usr/bin/s6-svscan /etc/s6
     depends_on:
@@ -74,8 +76,6 @@ services:
   #     - REMOTE_GITEA_SANDBOX_USER=${REMOTE_GITEA_SANDBOX_USER}
   #     - REMOTE_GITEA_SANDBOX_TOKEN=${REMOTE_GITEA_SANDBOX_TOKEN}
   #   entrypoint: ["/bin/sh", "-c"]
-  #   # $$ escapes are required — podman-compose/docker-compose interpolates
-  #   # $VARNAME in YAML values. $$ produces a literal $ in the rendered script.
   #   command:
   #     - |
   #       apk add --no-cache jq >/dev/null 2>&1
@@ -108,9 +108,6 @@ services:
     ports:
       - "127.0.0.1:10004:9001"
       - "127.0.0.1:10003:9000"
-    # volumes:
-    # Uncomment when necessary
-    # - ./data/minio:/data:Z
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
@@ -132,18 +129,13 @@ services:
         mc cp /seed/safe.jsonl spr/behavior/behavior/baseline/behavior.jsonl
         echo "Baseline seeded successfully"
 
-  ## ---------- Local Gitea DB ----------
-  ## Uncomment when using local Gitea (see above).
   gitea_db:
     image: docker.io/library/postgres:18
     restart: always
     environment:
-      - POSTGRES_USER=gitea # TODO: Use environment variables
+      - POSTGRES_USER=gitea
       - POSTGRES_PASSWORD=gitea
       - POSTGRES_DB=gitea
-    # volumes:
-    # Uncomment when necessary
-    # - ./data/postgres:/var/lib/postgresql:Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gitea -d gitea -h localhost"]
       interval: 5s
@@ -159,9 +151,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    # volumes:
-    # Uncomment when necessary
-    # - ./data/valkey:/data:Z
 
   core_db:
     image: docker.io/library/postgres:18
@@ -172,9 +161,6 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=core
-    # volumes:
-    # Uncomment when necessary
-    # - ./data/core_db:/var/lib/postgresql/data:Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d core -h localhost"]
       interval: 5s
@@ -193,11 +179,8 @@ services:
         condition: service_started
       valkey:
         condition: service_healthy
-      # For local Gitea: uncomment gitea, comment out gitea-remote
       gitea:
         condition: service_healthy
-      # gitea-remote:
-      #   condition: service_completed_successfully
       minio:
         condition: service_healthy
     ports:
@@ -222,6 +205,10 @@ services:
       - OSS_REBUILD_CMD=${OSS_REBUILD_CMD:-/app/scripts/oss-rebuild-npm.sh}
       - DIFFOSCOPE_CMD=${DIFFOSCOPE_CMD:-diffoscope}
       - REBUILD_WORK_DIR=${REBUILD_WORK_DIR:-/tmp/spr-rebuild}
+      - OSS_REBUILD_TIMEOUT=${OSS_REBUILD_TIMEOUT:-10m}
+      - DIFFOSCOPE_TIMEOUT=${DIFFOSCOPE_TIMEOUT:-2m}
+      - MAX_REBUILD_ARTIFACT_SIZE=${MAX_REBUILD_ARTIFACT_SIZE:-104857600}
+      - MAX_DIFFOSCOPE_REPORT_SIZE=${MAX_DIFFOSCOPE_REPORT_SIZE:-52428800}
       - SPR_MOCK=true
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
@@ -240,13 +227,11 @@ services:
     environment:
       - PORT=3000
       - HOST=0.0.0.0
-      # Database configuration for BetterAuth
       - POSTGRES_HOST=core_db
       - POSTGRES_PORT=5432
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=core
-      # Trusted origins for BetterAuth (CSRF protection)
       - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-http://localhost:7001,http://127.0.0.1:7001}
     depends_on:
       core_db:
@@ -272,6 +257,19 @@ services:
     image: docker.io/caddy:2-alpine
     ports:
       - "127.0.0.1:7001:8000"
-    volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/Caddyfile <<'EOF'
+        :8000 {
+          handle /api/* {
+            reverse_proxy spr:8080
+          }
+
+          handle {
+            reverse_proxy dashboard-ui:3000
+          }
+        }
+        EOF
+        caddy run --config /tmp/Caddyfile --adapter caddyfile
     restart: unless-stopped

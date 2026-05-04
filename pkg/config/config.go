@@ -4,6 +4,7 @@ package config
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -35,9 +36,13 @@ type MinIOConfig struct {
 }
 
 type RebuildConfig struct {
-	OSSRebuildCmd string
-	DiffoscopeCmd string
-	WorkDir       string
+	OSSRebuildCmd            string
+	DiffoscopeCmd            string
+	WorkDir                  string
+	OSSRebuildTimeout        time.Duration
+	DiffoscopeTimeout        time.Duration
+	MaxRebuildArtifactBytes  int64
+	MaxDiffoscopeReportBytes int64
 }
 
 // This includes configuration required by all microservices. For example, RabbitMQ connection details are required to communicate between the services
@@ -84,9 +89,13 @@ func NewCoreConfig(modifiers ...modifier) *CoreConfig {
 			Bucket:    "behavior",
 		},
 		Rebuild: RebuildConfig{
-			OSSRebuildCmd: "",
-			DiffoscopeCmd: "diffoscope",
-			WorkDir:       "/tmp/spr-rebuild",
+			OSSRebuildCmd:            "",
+			DiffoscopeCmd:            "diffoscope",
+			WorkDir:                  "/tmp/spr-rebuild",
+			OSSRebuildTimeout:        10 * time.Minute,
+			DiffoscopeTimeout:        2 * time.Minute,
+			MaxRebuildArtifactBytes:  100 * 1024 * 1024,
+			MaxDiffoscopeReportBytes: 50 * 1024 * 1024,
 		},
 		ReverseProxy: ReverseProxyConfig{
 			ExternalURL: "http://localhost:7002",
@@ -135,6 +144,10 @@ func WithEnv() modifier {
 		cfg.Rebuild.OSSRebuildCmd = getEnv("OSS_REBUILD_CMD", cfg.Rebuild.OSSRebuildCmd)
 		cfg.Rebuild.DiffoscopeCmd = getEnv("DIFFOSCOPE_CMD", cfg.Rebuild.DiffoscopeCmd)
 		cfg.Rebuild.WorkDir = getEnv("REBUILD_WORK_DIR", cfg.Rebuild.WorkDir)
+		cfg.Rebuild.OSSRebuildTimeout = getEnvDuration("OSS_REBUILD_TIMEOUT", cfg.Rebuild.OSSRebuildTimeout)
+		cfg.Rebuild.DiffoscopeTimeout = getEnvDuration("DIFFOSCOPE_TIMEOUT", cfg.Rebuild.DiffoscopeTimeout)
+		cfg.Rebuild.MaxRebuildArtifactBytes = getEnvInt64("MAX_REBUILD_ARTIFACT_SIZE", cfg.Rebuild.MaxRebuildArtifactBytes)
+		cfg.Rebuild.MaxDiffoscopeReportBytes = getEnvInt64("MAX_DIFFOSCOPE_REPORT_SIZE", cfg.Rebuild.MaxDiffoscopeReportBytes)
 
 		cfg.ReverseProxy.ExternalURL = getEnv("REVERSE_PROXY_EXTERNAL_URL", cfg.ReverseProxy.ExternalURL)
 
@@ -149,4 +162,32 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	value := getEnv(key, "")
+	if value == "" {
+		return defaultValue
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	value := getEnv(key, "")
+	if value == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
 }
