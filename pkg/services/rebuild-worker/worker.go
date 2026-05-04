@@ -458,22 +458,19 @@ func buildDiffoscopeReport(
 	cmd := exec.CommandContext(ctx, diffoscopeCmd, args...)
 	output, err := cmd.CombinedOutput()
 
-	if err == nil {
-		data, readErr := os.ReadFile(outputPath)
-		if readErr == nil && len(data) > 0 {
-			return data, false
-		}
+	// Diffoscope may return a non-zero exit code when differences are found.
+	// If it still produced a readable HTML report, treat that as success and
+	// store the real report instead of falling back.
+	data, readErr := os.ReadFile(outputPath)
+	if readErr == nil && len(data) > 0 {
+		return data, false
+	}
 
-		fallback := fallbackDiffoscopeHTML(
-			req,
-			diffoscopeCmd,
-			args,
-			officialHash,
-			rebuiltHash,
-			output,
-			fmt.Errorf("diffoscope exited successfully but output report was empty or unreadable: %w", readErr),
-		)
-		return fallback, true
+	var fallbackErr error
+	if err != nil {
+		fallbackErr = err
+	} else {
+		fallbackErr = fmt.Errorf("diffoscope output report was empty or unreadable: %w", readErr)
 	}
 
 	fallback := fallbackDiffoscopeHTML(
@@ -483,7 +480,7 @@ func buildDiffoscopeReport(
 		officialHash,
 		rebuiltHash,
 		output,
-		err,
+		fallbackErr,
 	)
 	return fallback, true
 }
