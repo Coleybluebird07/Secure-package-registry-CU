@@ -202,7 +202,15 @@ func handleRebuildRequest(
 		return completed
 	}
 
-	rebuildLog, err := runOSSRebuild(ctx, deps.Config.Rebuild.OSSRebuildCmd, req, tarballURL, officialPath, rebuiltPath)
+	rebuildLog, err := runOSSRebuild(
+		ctx,
+		deps.Config.Rebuild.OSSRebuildCmd,
+		deps.Config.Rebuild.OSSRebuildTimeout,
+		req,
+		tarballURL,
+		officialPath,
+		rebuiltPath,
+	)
 	_ = os.WriteFile(logPath, []byte(rebuildLog), 0o644)
 	if err != nil {
 		if errors.Is(err, errRebuildUnavailable) {
@@ -213,7 +221,7 @@ func handleRebuildRequest(
 		return completed
 	}
 
-	rebuiltBytes, err := os.ReadFile(rebuiltPath)
+	rebuiltBytes, err := readFileWithLimit(rebuiltPath, deps.Config.Rebuild.MaxRebuildArtifactBytes)
 	if err != nil {
 		completed.FailureReason = fmt.Sprintf("reading rebuilt artifact: %v", err)
 		storeLogs(ctx, minioClient, req, logPath, &completed)
@@ -277,6 +285,8 @@ func handleRebuildRequest(
 		diffBytes, fallbackUsed := buildDiffoscopeReport(
 			ctx,
 			deps.Config.Rebuild.DiffoscopeCmd,
+			deps.Config.Rebuild.DiffoscopeTimeout,
+			deps.Config.Rebuild.MaxDiffoscopeReportBytes,
 			req,
 			officialPath,
 			rebuiltPath,
@@ -410,12 +420,21 @@ var errRebuildUnavailable = errors.New("oss rebuild unavailable")
 func runOSSRebuild(
 	ctx context.Context,
 	command string,
+	timeout time.Duration,
 	req messages.RebuildRequested,
 	tarballURL string,
 	officialPath string,
 	rebuiltPath string,
 ) (string, error) {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	runCtx := ctx
+	cancel := func() {}
+
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	cmd := exec.CommandContext(runCtx, "sh", "-c", command)
 	cmd.Env = append(os.Environ(),
 		"SPR_PACKAGE="+req.Identifier,
 		"SPR_VERSION="+req.Version,
@@ -428,6 +447,10 @@ func runOSSRebuild(
 
 	output, err := cmd.CombinedOutput()
 	logText := string(output)
+
+	if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+		return logText, fmt.Errorf("%w: command timed out after %s", errRebuildUnavailable, timeout)
+	}
 
 	if err != nil {
 		return logText, fmt.Errorf("%w: command failed: %v: %s", errRebuildUnavailable, err, strings.TrimSpace(logText))
@@ -443,6 +466,8 @@ func runOSSRebuild(
 func buildDiffoscopeReport(
 	ctx context.Context,
 	diffoscopeCmd string,
+	timeout time.Duration,
+	maxReportBytes int64,
 	req messages.RebuildRequested,
 	officialPath string,
 	rebuiltPath string,
@@ -454,23 +479,34 @@ func buildDiffoscopeReport(
 		diffoscopeCmd = "diffoscope"
 	}
 
+	runCtx := ctx
+	cancel := func() {}
+
+	if timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
 	args := []string{"--html", outputPath, officialPath, rebuiltPath}
-	cmd := exec.CommandContext(ctx, diffoscopeCmd, args...)
+	cmd := exec.CommandContext(runCtx, diffoscopeCmd, args...)
 	output, err := cmd.CombinedOutput()
 
 	// Diffoscope may return a non-zero exit code when differences are found.
-	// If it still produced a readable HTML report, treat that as success and
-	// store the real report instead of falling back.
-	data, readErr := os.ReadFile(outputPath)
+	// If it still produced a readable HTML report within the configured size
+	// limit, treat that as success and store the real report.
+	data, readErr := readFileWithLimit(outputPath, maxReportBytes)
 	if readErr == nil && len(data) > 0 {
 		return data, false
 	}
 
 	var fallbackErr error
-	if err != nil {
+	switch {
+	case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+		fallbackErr = fmt.Errorf("diffoscope timed out after %s", timeout)
+	case err != nil:
 		fallbackErr = err
-	} else {
-		fallbackErr = fmt.Errorf("diffoscope output report was empty or unreadable: %w", readErr)
+	default:
+		fallbackErr = fmt.Errorf("diffoscope output report was empty, unreadable, or exceeded size limit: %w", readErr)
 	}
 
 	fallback := fallbackDiffoscopeHTML(
@@ -652,6 +688,38 @@ func storeUnavailableMetadata(ctx context.Context, minioClient *sprminio.Client,
 		return err
 	}
 	return minioClient.PutObject(ctx, rebuildBaseKey(req)+"/metadata.json", data, "application/json")
+}
+
+func readFileWithLimit(path string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return os.ReadFile(path)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if info.Size() > maxBytes {
+		return nil, fmt.Errorf("file %s is %d bytes, exceeds limit of %d bytes", path, info.Size(), maxBytes)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("file %s exceeds limit of %d bytes", path, maxBytes)
+	}
+
+	return data, nil
 }
 
 func rebuildBaseKey(req messages.RebuildRequested) string {
