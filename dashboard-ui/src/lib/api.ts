@@ -144,6 +144,36 @@ export const rebuildAPI = {
 		return fetch(`${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`);
 	},
 
+	getArtifactBlob: async (
+		taskId: number,
+		kind: RebuildArtifactKind,
+	): Promise<Blob> => {
+		const response = await fetch(
+			`${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`,
+		);
+
+		if (!response.ok) {
+			throw new APIError(response.status, `Failed to fetch ${kind} artifact`);
+		}
+
+		return response.blob();
+	},
+
+	getArtifactText: async (
+		taskId: number,
+		kind: RebuildArtifactKind,
+	): Promise<string> => {
+		const response = await fetch(
+			`${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`,
+		);
+
+		if (!response.ok) {
+			throw new APIError(response.status, `Failed to fetch ${kind} artifact`);
+		}
+
+		return response.text();
+	},
+
 	getForPackage: (
 		ecosystem: string,
 		identifier: string,

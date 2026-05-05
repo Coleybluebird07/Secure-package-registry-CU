@@ -91,6 +91,19 @@ export interface RebuildTaskDetail {
 	updated_at: string;
 }
 
+export interface RebuildMetadata {
+	task_id: number;
+	ecosystem: string;
+	package: string;
+	version: string;
+	source: string;
+	matched: boolean;
+	official_sha256: string;
+	rebuilt_sha256?: string;
+	official_tarball: string;
+	generated_at: string;
+}
+
 export interface TriggerRebuildRequest {
 	version?: string;
 	source?: string;

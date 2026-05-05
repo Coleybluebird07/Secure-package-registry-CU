@@ -1,0 +1,9 @@
+FROM docker.gitea.com/gitea:1.25.4
+
+USER root
+
+COPY infra/gitea-custom/conf/app.ini /opt/spr-gitea/app.ini
+COPY infra/gitea/setup.sh /opt/spr-gitea/setup.sh
+
+RUN chmod 0644 /opt/spr-gitea/app.ini \
+    && chmod 0755 /opt/spr-gitea/setup.sh
