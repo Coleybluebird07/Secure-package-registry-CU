@@ -3,15 +3,16 @@
   import { packagesAPI, rebuildAPI } from "$lib/api";
   import type { PackageVersion, RebuildTaskDetail } from "$lib/types/api";
   import {
-    ArrowLeft,
+    Activity,
     AlertCircle,
+    Archive,
+    ArrowLeft,
+    FileText,
+    GitCompare,
     Loader2,
     Play,
-    Activity,
-    FileText,
-    ScrollText,
-    Archive,
     RotateCcw,
+    ScrollText,
   } from "lucide-svelte";
 
   let ecosystem = $derived($page.params.ecosystem ?? "");
@@ -291,6 +292,16 @@
                       <a href={rebuild.diffoscope_url} class="artifact-link">
                         <Activity class="icon-xs" />
                         Diffoscope
+                      </a>
+                    {/if}
+
+                    {#if rebuild.has_official_artifact && rebuild.has_rebuilt_artifact}
+                      <a
+                        href="/admin/rebuild-tasks/{rebuild.id}/diff"
+                        class="artifact-link"
+                      >
+                        <GitCompare class="icon-xs" />
+                        Compare
                       </a>
                     {/if}
 

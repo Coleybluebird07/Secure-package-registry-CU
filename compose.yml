@@ -9,11 +9,12 @@ services:
       RABBITMQ_DEFAULT_PASS: "admin"
 
   ## ---------- Local Gitea ----------
-  ## Uncomment gitea + gitea_db (and comment out gitea-remote) to use a local
-  ## Gitea instance. The entrypoint creates accounts, generates tokens, and
-  ## seeds the gitea:config key in Valkey automatically.
+  ## Builds a small local Gitea image with app.ini and setup.sh copied in.
+  ## This avoids Docker Desktop bind-mount deadlock issues with config files.
   gitea:
-    image: docker.gitea.com/gitea:1.25.4
+    build:
+      context: .
+      dockerfile: infra/gitea/Containerfile
     environment:
       - USER_UID=1000
       - USER_GID=1000
@@ -24,21 +25,16 @@ services:
       - GITEA__database__PASSWD=gitea
       - GITEA__security__INSTALL_LOCK=true
       - GITEA_CUSTOM=/data/gitea/custom
-    volumes:
-      # Uncomment when necessary. No persistence necessary for testing phase
-      # - ./data/gitea:/data:Z
-      - ./infra/gitea-custom/conf/app.ini:/tmp/gitea-app.ini:ro
-      - ./infra/gitea/setup.sh:/gitea-setup.sh:ro
     ports:
-      - "127.0.0.1:10005:3000" # Gitea web UI (3rd party internal)
+      - "127.0.0.1:10005:3000" # Gitea web UI
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         apk update
         apk add valkey-cli jq
         mkdir -p /data/gitea/custom/conf
-        cp /tmp/gitea-app.ini /data/gitea/custom/conf/app.ini
-        cat /gitea-setup.sh >> /etc/s6/gitea/setup
+        cp /opt/spr-gitea/app.ini /data/gitea/custom/conf/app.ini
+        cat /opt/spr-gitea/setup.sh >> /etc/s6/gitea/setup
         /usr/bin/entrypoint /usr/bin/s6-svscan /etc/s6
     depends_on:
       gitea_db:
@@ -57,46 +53,6 @@ services:
       timeout: 5s
       retries: 30
       start_period: 10s
-
-  ## ---------- Remote Gitea ----------
-  ## Seeds credentials from .env into the gitea:config Valkey key.
-  ## Comment this out and uncomment the gitea + gitea_db services above
-  ## to switch back to a local Gitea instance.
-  # gitea-remote:
-  #   image: docker.io/valkey/valkey:9.0.2-alpine
-  #   depends_on:
-  #     valkey:
-  #       condition: service_healthy
-  #   environment:
-  #     - REMOTE_GITEA_BASE_URL=${REMOTE_GITEA_BASE_URL}
-  #     - REMOTE_GITEA_ADMIN_USER=${REMOTE_GITEA_ADMIN_USER}
-  #     - REMOTE_GITEA_ADMIN_TOKEN=${REMOTE_GITEA_ADMIN_TOKEN}
-  #     - REMOTE_GITEA_REGISTRY_USER=${REMOTE_GITEA_REGISTRY_USER}
-  #     - REMOTE_GITEA_REGISTRY_TOKEN=${REMOTE_GITEA_REGISTRY_TOKEN}
-  #     - REMOTE_GITEA_SANDBOX_USER=${REMOTE_GITEA_SANDBOX_USER}
-  #     - REMOTE_GITEA_SANDBOX_TOKEN=${REMOTE_GITEA_SANDBOX_TOKEN}
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   command:
-  #     - |
-  #       apk add --no-cache jq >/dev/null 2>&1
-  #       GITEA_CONFIG=$$(jq -nc \
-  #         --arg base_url "$$REMOTE_GITEA_BASE_URL" \
-  #         --arg admin_user "$$REMOTE_GITEA_ADMIN_USER" \
-  #         --arg admin_token "$$REMOTE_GITEA_ADMIN_TOKEN" \
-  #         --arg registry_user "$$REMOTE_GITEA_REGISTRY_USER" \
-  #         --arg registry_token "$$REMOTE_GITEA_REGISTRY_TOKEN" \
-  #         --arg sandbox_user "$$REMOTE_GITEA_SANDBOX_USER" \
-  #         --arg sandbox_token "$$REMOTE_GITEA_SANDBOX_TOKEN" \
-  #         '{
-  #           "base_url": $$base_url,
-  #           "accounts": {
-  #             "admin":    { "username": $$admin_user,    "token": $$admin_token },
-  #             "registry": { "username": $$registry_user, "token": $$registry_token },
-  #             "sandbox":  { "username": $$sandbox_user,  "token": $$sandbox_token }
-  #           }
-  #         }')
-  #       valkey-cli -h valkey -p 6379 SET gitea:config "$$GITEA_CONFIG" NX
-  #       echo "Remote Gitea config seeded into Valkey"
 
   minio:
     image: docker.io/minio/minio:latest
@@ -185,7 +141,7 @@ services:
         condition: service_healthy
     ports:
       - "127.0.0.1:7002:7002" # reg-proxy (public)
-      - "127.0.0.1:20001:8081" # internal API (1st party internal)
+      - "127.0.0.1:20001:8081" # internal API
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:

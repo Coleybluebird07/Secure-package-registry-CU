@@ -8,7 +8,6 @@
   } from "$lib/types/api";
   import {
     ArrowLeft,
-    Loader2,
     ShieldCheck,
     ShieldAlert,
     ChevronRight,
