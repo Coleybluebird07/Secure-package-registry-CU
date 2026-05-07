@@ -57,6 +57,18 @@
     return "Rebuild Checked";
   }
 
+  function suggestedSupportedVersion(
+    task: RebuildTaskDetail | null | undefined,
+  ) {
+    if (!task?.failure_reason) return null;
+
+    const match = task.failure_reason.match(
+      /Newest supported OSS Rebuild version:\s*([^\s]+)/,
+    );
+
+    return match?.[1] ?? null;
+  }
+
   async function loadRebuildForVersion(version: string) {
     try {
       const response = await rebuildAPI.getForPackage(ecosystem, name, version);
@@ -145,7 +157,7 @@
         [version]: message,
       };
 
-      await loadRebuildForVersion(version);
+      await loadVersions();
     } catch (e) {
       rebuildErrorByVersion = {
         ...rebuildErrorByVersion,
@@ -239,6 +251,8 @@
           {#each packageVersion.versions as version}
             {@const rebuild = rebuildByVersion[version]}
             {@const rebuilding = rebuildingByVersion[version]}
+            {@const supportedVersion = suggestedSupportedVersion(rebuild)}
+
             <tr>
               <td class="cell-version">
                 {version}
@@ -257,13 +271,37 @@
                 {#if rebuild}
                   {#if rebuild.failure_reason}
                     <div class="failure-reason">{rebuild.failure_reason}</div>
+
+                    {#if supportedVersion}
+                      <div class="supported-version-callout">
+                        <span>
+                          Latest version is not covered by OSS Rebuild. Newest
+                          supported version:
+                          <strong>{supportedVersion}</strong>
+                        </span>
+
+                        <button
+                          class="inline-action-button"
+                          disabled={rebuildingByVersion[supportedVersion]}
+                          onclick={() => handleRebuild(supportedVersion)}
+                        >
+                          {#if rebuildingByVersion[supportedVersion]}
+                            <Loader2 class="icon-spin-small" />
+                          {:else}
+                            <RotateCcw class="icon-xs" />
+                          {/if}
+                          Check supported version
+                        </button>
+                      </div>
+                    {/if}
                   {:else if rebuild.status === "succeeded" && rebuild.matched === true}
                     <span class="detail-muted">
-                      Distributed npm artifact matched rebuilt artifact.
+                      Distributed registry artifact matched rebuilt artifact.
                     </span>
                   {:else if rebuild.status === "succeeded" && rebuild.matched === false}
                     <span class="detail-muted">
-                      Distributed npm artifact did not match rebuilt artifact.
+                      Distributed registry artifact did not match rebuilt
+                      artifact.
                     </span>
                   {:else}
                     <span class="detail-muted">
@@ -498,13 +536,16 @@
   }
 
   .btn-secondary :global(.icon-xs),
-  .btn-secondary :global(.icon-spin-small) {
+  .btn-secondary :global(.icon-spin-small),
+  .inline-action-button :global(.icon-xs),
+  .inline-action-button :global(.icon-spin-small) {
     width: 0.875rem;
     height: 0.875rem;
   }
 
   .btn-primary :global(.icon-spin),
-  .btn-secondary :global(.icon-spin-small) {
+  .btn-secondary :global(.icon-spin-small),
+  .inline-action-button :global(.icon-spin-small) {
     animation: spin 1s linear infinite;
   }
 
@@ -731,6 +772,50 @@
     max-width: 32rem;
     font-size: 0.8125rem;
     color: var(--text-secondary);
+  }
+
+  .supported-version-callout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    border: 1px solid rgba(234, 179, 8, 0.25);
+    border-radius: 6px;
+    background: rgba(234, 179, 8, 0.08);
+    color: var(--text-secondary);
+    font-size: 0.8125rem;
+  }
+
+  .supported-version-callout strong {
+    color: var(--text-primary);
+    font-family:
+      ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  .inline-action-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.375rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .inline-action-button:hover {
+    color: var(--accent);
+    background: var(--bg-primary);
+  }
+
+  .inline-action-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .artifact-links {

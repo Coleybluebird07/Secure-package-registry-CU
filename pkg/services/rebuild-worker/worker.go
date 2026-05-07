@@ -1,7 +1,7 @@
 // Package rebuildworker implements the reproducible-build verification worker.
 //
 // The worker consumes spr.rebuild.requested messages, downloads the official
-// npm artifact, attempts to obtain a rebuilt artifact through a configurable
+// registry artifact, attempts to obtain a rebuilt artifact through a configurable
 // OSS Rebuild command hook, compares both artifacts, runs diffoscope when they
 // differ, stores outputs in MinIO, and publishes spr.rebuild.completed.
 package rebuildworker
@@ -55,6 +55,25 @@ type npmDist struct {
 	Tarball   string `json:"tarball"`
 	Shasum    string `json:"shasum,omitempty"`
 	Integrity string `json:"integrity,omitempty"`
+}
+
+type pypiMetadata struct {
+	Info pypiInfo   `json:"info"`
+	URLs []pypiFile `json:"urls"`
+}
+
+type pypiInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type pypiFile struct {
+	Filename    string `json:"filename"`
+	URL         string `json:"url"`
+	PackageType string `json:"packagetype"`
+	Digests     struct {
+		SHA256 string `json:"sha256"`
+	} `json:"digests"`
 }
 
 type rebuildMetadata struct {
@@ -165,12 +184,6 @@ func handleRebuildRequest(
 		Source:     req.Source,
 	}
 
-	if req.Ecosystem != "npm" {
-		completed.Unavailable = true
-		completed.FailureReason = fmt.Sprintf("rebuild verification only supports npm in this worker, got %q", req.Ecosystem)
-		return completed
-	}
-
 	workDir, cleanup, err := createWorkDir(deps.Config.Rebuild.WorkDir, req)
 	if err != nil {
 		completed.FailureReason = err.Error()
@@ -178,18 +191,28 @@ func handleRebuildRequest(
 	}
 	defer cleanup()
 
-	officialPath := filepath.Join(workDir, "official.tgz")
-	rebuiltPath := filepath.Join(workDir, "rebuilt.tgz")
+	officialPath := filepath.Join(workDir, "official.artifact")
+	rebuiltPath := filepath.Join(workDir, "rebuilt.artifact")
 	diffPath := filepath.Join(workDir, "diffoscope.html")
 	logPath := filepath.Join(workDir, "rebuild.log")
 
-	tarballURL, officialBytes, err := downloadOfficialNPMTarball(ctx, deps.Config.NPM.RegistryURL, req.Identifier, req.Version)
+	artifactURL, officialBytes, err := downloadOfficialArtifact(
+		ctx,
+		deps.Config.NPM.RegistryURL,
+		req.Ecosystem,
+		req.Identifier,
+		req.Version,
+	)
 	if err != nil {
-		completed.FailureReason = fmt.Sprintf("downloading official npm tarball: %v", err)
+		if errors.Is(err, errRebuildUnavailable) {
+			completed.Unavailable = true
+		}
+		completed.FailureReason = fmt.Sprintf("downloading official artifact: %v", err)
 		return completed
 	}
+
 	if err := os.WriteFile(officialPath, officialBytes, 0o644); err != nil {
-		completed.FailureReason = fmt.Sprintf("writing official tarball: %v", err)
+		completed.FailureReason = fmt.Sprintf("writing official artifact: %v", err)
 		return completed
 	}
 
@@ -198,7 +221,7 @@ func handleRebuildRequest(
 	if deps.Config.Rebuild.OSSRebuildCmd == "" {
 		completed.Unavailable = true
 		completed.FailureReason = "OSS_REBUILD_CMD is not configured"
-		_ = storeUnavailableMetadata(ctx, minioClient, req, tarballURL, officialHash, completed.FailureReason)
+		_ = storeUnavailableMetadata(ctx, minioClient, req, artifactURL, officialHash, completed.FailureReason)
 		return completed
 	}
 
@@ -207,7 +230,7 @@ func handleRebuildRequest(
 		deps.Config.Rebuild.OSSRebuildCmd,
 		deps.Config.Rebuild.OSSRebuildTimeout,
 		req,
-		tarballURL,
+		artifactURL,
 		officialPath,
 		rebuiltPath,
 	)
@@ -232,16 +255,16 @@ func handleRebuildRequest(
 	matched := bytes.Equal(officialBytes, rebuiltBytes)
 
 	baseKey := rebuildBaseKey(req)
-	officialKey := baseKey + "/official.tgz"
-	rebuiltKey := baseKey + "/rebuilt.tgz"
+	officialKey := baseKey + "/official.artifact"
+	rebuiltKey := baseKey + "/rebuilt.artifact"
 	metadataKey := baseKey + "/metadata.json"
 	logsKey := baseKey + "/rebuild.log"
 
-	if err := minioClient.PutObject(ctx, officialKey, officialBytes, "application/gzip"); err != nil {
+	if err := minioClient.PutObject(ctx, officialKey, officialBytes, "application/octet-stream"); err != nil {
 		completed.FailureReason = fmt.Sprintf("uploading official artifact: %v", err)
 		return completed
 	}
-	if err := minioClient.PutObject(ctx, rebuiltKey, rebuiltBytes, "application/gzip"); err != nil {
+	if err := minioClient.PutObject(ctx, rebuiltKey, rebuiltBytes, "application/octet-stream"); err != nil {
 		completed.FailureReason = fmt.Sprintf("uploading rebuilt artifact: %v", err)
 		return completed
 	}
@@ -255,7 +278,7 @@ func handleRebuildRequest(
 		Matched:         matched,
 		OfficialSHA256:  officialHash,
 		RebuiltSHA256:   rebuiltHash,
-		OfficialTarball: tarballURL,
+		OfficialTarball: artifactURL,
 		GeneratedAt:     time.Now().UTC(),
 	}
 	metadataBytes, _ := json.MarshalIndent(metadata, "", "  ")
@@ -338,6 +361,29 @@ func createWorkDir(root string, req messages.RebuildRequested) (string, func(), 
 	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
+var errRebuildUnavailable = errors.New("oss rebuild unavailable")
+
+func downloadOfficialArtifact(
+	ctx context.Context,
+	npmRegistryURL string,
+	ecosystem string,
+	packageName string,
+	version string,
+) (string, []byte, error) {
+	switch ecosystem {
+	case "npm":
+		return downloadOfficialNPMTarball(ctx, npmRegistryURL, packageName, version)
+	case "pypi":
+		return downloadOfficialPyPIArtifact(ctx, packageName, version)
+	case "cargo":
+		return downloadOfficialCargoArtifact(ctx, packageName, version)
+	case "go":
+		return "", nil, fmt.Errorf("%w: OSS Rebuild does not currently support Go modules in this SPR worker", errRebuildUnavailable)
+	default:
+		return "", nil, fmt.Errorf("%w: unsupported ecosystem %q", errRebuildUnavailable, ecosystem)
+	}
+}
+
 func downloadOfficialNPMTarball(ctx context.Context, registryURL, packageName, version string) (string, []byte, error) {
 	metadataURL, err := npmMetadataURL(registryURL, packageName)
 	if err != nil {
@@ -372,26 +418,125 @@ func downloadOfficialNPMTarball(ctx context.Context, registryURL, packageName, v
 		return "", nil, fmt.Errorf("npm metadata has no tarball URL for %s@%s", packageName, version)
 	}
 
-	tarballReq, err := http.NewRequestWithContext(ctx, http.MethodGet, versionData.Dist.Tarball, nil)
+	data, err := downloadURL(ctx, versionData.Dist.Tarball)
 	if err != nil {
 		return "", nil, err
 	}
-	tarballResp, err := http.DefaultClient.Do(tarballReq)
-	if err != nil {
-		return "", nil, fmt.Errorf("downloading npm tarball: %w", err)
-	}
-	defer tarballResp.Body.Close()
-
-	if tarballResp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("downloading npm tarball returned status %d", tarballResp.StatusCode)
-	}
-
-	data, err := io.ReadAll(tarballResp.Body)
-	if err != nil {
-		return "", nil, fmt.Errorf("reading npm tarball: %w", err)
-	}
 
 	return versionData.Dist.Tarball, data, nil
+}
+
+func downloadOfficialPyPIArtifact(ctx context.Context, packageName, version string) (string, []byte, error) {
+	metadataURL := fmt.Sprintf(
+		"https://pypi.org/pypi/%s/%s/json",
+		url.PathEscape(packageName),
+		url.PathEscape(version),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+	if err != nil {
+		return "", nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("fetching PyPI metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil, fmt.Errorf("%w: PyPI package/version not found: %s@%s", errRebuildUnavailable, packageName, version)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("fetching PyPI metadata returned status %d", resp.StatusCode)
+	}
+
+	var meta pypiMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&meta); err != nil {
+		return "", nil, fmt.Errorf("decoding PyPI metadata: %w", err)
+	}
+
+	if len(meta.URLs) == 0 {
+		return "", nil, fmt.Errorf("%w: PyPI has no distribution files for %s@%s", errRebuildUnavailable, packageName, version)
+	}
+
+	selected := meta.URLs[0]
+	for _, file := range meta.URLs {
+		if file.PackageType == "sdist" {
+			selected = file
+			break
+		}
+	}
+
+	if selected.URL == "" {
+		return "", nil, fmt.Errorf("%w: PyPI metadata has no download URL for %s@%s", errRebuildUnavailable, packageName, version)
+	}
+
+	data, err := downloadURL(ctx, selected.URL)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return selected.URL, data, nil
+}
+
+func downloadOfficialCargoArtifact(ctx context.Context, crateName, version string) (string, []byte, error) {
+	artifactURL := fmt.Sprintf(
+		"https://crates.io/api/v1/crates/%s/%s/download",
+		url.PathEscape(crateName),
+		url.PathEscape(version),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, artifactURL, nil)
+	if err != nil {
+		return "", nil, err
+	}
+
+	req.Header.Set("User-Agent", "secure-package-registry/1.0")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", nil, fmt.Errorf("downloading crates.io artifact: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil, fmt.Errorf("%w: crate/version not found: %s@%s", errRebuildUnavailable, crateName, version)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("downloading crates.io artifact returned status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", nil, fmt.Errorf("reading crates.io artifact: %w", err)
+	}
+
+	return resp.Request.URL.String(), data, nil
+}
+
+func downloadURL(ctx context.Context, downloadURL string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("downloading artifact: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("downloading artifact returned status %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading artifact: %w", err)
+	}
+
+	return data, nil
 }
 
 func npmMetadataURL(registryURL, packageName string) (string, error) {
@@ -415,14 +560,12 @@ func npmMetadataURL(registryURL, packageName string) (string, error) {
 	return base.ResolveReference(rel).String(), nil
 }
 
-var errRebuildUnavailable = errors.New("oss rebuild unavailable")
-
 func runOSSRebuild(
 	ctx context.Context,
 	command string,
 	timeout time.Duration,
 	req messages.RebuildRequested,
-	tarballURL string,
+	artifactURL string,
 	officialPath string,
 	rebuiltPath string,
 ) (string, error) {
@@ -440,7 +583,7 @@ func runOSSRebuild(
 		"SPR_VERSION="+req.Version,
 		"SPR_ECOSYSTEM="+req.Ecosystem,
 		"SPR_SOURCE="+req.Source,
-		"SPR_OFFICIAL_TARBALL_URL="+tarballURL,
+		"SPR_OFFICIAL_TARBALL_URL="+artifactURL,
 		"SPR_OFFICIAL_ARTIFACT="+officialPath,
 		"SPR_REBUILT_ARTIFACT="+rebuiltPath,
 	)
@@ -491,9 +634,6 @@ func buildDiffoscopeReport(
 	cmd := exec.CommandContext(runCtx, diffoscopeCmd, args...)
 	output, err := cmd.CombinedOutput()
 
-	// Diffoscope may return a non-zero exit code when differences are found.
-	// If it still produced a readable HTML report within the configured size
-	// limit, treat that as success and store the real report.
 	data, readErr := readFileWithLimit(outputPath, maxReportBytes)
 	if readErr == nil && len(data) > 0 {
 		return data, false
@@ -546,98 +686,34 @@ func fallbackDiffoscopeHTML(
 <head>
   <meta charset="utf-8">
   <title>Diffoscope fallback report</title>
-  <style>
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      line-height: 1.5;
-      margin: 2rem;
-      color: #111827;
-      background: #f9fafb;
-    }
-    .card {
-      background: white;
-      border: 1px solid #e5e7eb;
-      border-radius: 0.75rem;
-      padding: 1.25rem;
-      margin-bottom: 1rem;
-      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-    }
-    h1 {
-      margin-top: 0;
-      font-size: 1.5rem;
-    }
-    h2 {
-      font-size: 1rem;
-      margin-top: 0;
-    }
-    dl {
-      display: grid;
-      grid-template-columns: max-content 1fr;
-      gap: 0.5rem 1rem;
-    }
-    dt {
-      font-weight: 700;
-    }
-    dd {
-      margin: 0;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      word-break: break-all;
-    }
-    pre {
-      white-space: pre-wrap;
-      word-break: break-word;
-      background: #111827;
-      color: #f9fafb;
-      padding: 1rem;
-      border-radius: 0.5rem;
-      overflow: auto;
-    }
-    .warning {
-      color: #92400e;
-      background: #fffbeb;
-      border-color: #fde68a;
-    }
-  </style>
 </head>
 <body>
-  <div class="card warning">
-    <h1>Diffoscope fallback report</h1>
-    <p>The artifacts did not match, but diffoscope did not produce a normal HTML report. This fallback report preserves the package details, hashes, command, failure reason, and captured diffoscope output.</p>
-  </div>
+  <h1>Diffoscope fallback report</h1>
+  <p>The artifacts did not match, but diffoscope did not produce a normal HTML report.</p>
 
-  <div class="card">
-    <h2>Package</h2>
-    <dl>
-      <dt>Ecosystem</dt><dd>%s</dd>
-      <dt>Package</dt><dd>%s</dd>
-      <dt>Version</dt><dd>%s</dd>
-      <dt>Source</dt><dd>%s</dd>
-      <dt>Task ID</dt><dd>%d</dd>
-    </dl>
-  </div>
+  <h2>Package</h2>
+  <dl>
+    <dt>Ecosystem</dt><dd>%s</dd>
+    <dt>Package</dt><dd>%s</dd>
+    <dt>Version</dt><dd>%s</dd>
+    <dt>Source</dt><dd>%s</dd>
+    <dt>Task ID</dt><dd>%d</dd>
+  </dl>
 
-  <div class="card">
-    <h2>Artifact hashes</h2>
-    <dl>
-      <dt>Official SHA256</dt><dd>%s</dd>
-      <dt>Rebuilt SHA256</dt><dd>%s</dd>
-    </dl>
-  </div>
+  <h2>Artifact hashes</h2>
+  <dl>
+    <dt>Official SHA256</dt><dd>%s</dd>
+    <dt>Rebuilt SHA256</dt><dd>%s</dd>
+  </dl>
 
-  <div class="card">
-    <h2>Diffoscope command</h2>
-    <pre>%s</pre>
-  </div>
+  <h2>Diffoscope command</h2>
+  <pre>%s</pre>
 
-  <div class="card">
-    <h2>Failure reason</h2>
-    <pre>%s</pre>
-  </div>
+  <h2>Failure reason</h2>
+  <pre>%s</pre>
 
-  <div class="card">
-    <h2>Captured stdout/stderr</h2>
-    <pre>%s</pre>
-  </div>
+  <h2>Captured stdout/stderr</h2>
+  <pre>%s</pre>
 </body>
 </html>
 `,
@@ -670,14 +746,14 @@ func storeLogs(ctx context.Context, minioClient *sprminio.Client, req messages.R
 	completed.LogsKey = key
 }
 
-func storeUnavailableMetadata(ctx context.Context, minioClient *sprminio.Client, req messages.RebuildRequested, tarballURL, officialHash, reason string) error {
+func storeUnavailableMetadata(ctx context.Context, minioClient *sprminio.Client, req messages.RebuildRequested, artifactURL, officialHash, reason string) error {
 	metadata := map[string]any{
 		"task_id":          req.TaskID,
 		"ecosystem":        req.Ecosystem,
 		"package":          req.Identifier,
 		"version":          req.Version,
 		"source":           req.Source,
-		"official_tarball": tarballURL,
+		"official_tarball": artifactURL,
 		"official_sha256":  officialHash,
 		"unavailable":      true,
 		"reason":           reason,
