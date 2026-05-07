@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
 
 	"git.duti.dev/secure-package-registry/internal/messages"
 	"git.duti.dev/secure-package-registry/pkg/logger"
@@ -24,6 +29,25 @@ type watcher struct {
 	publisher       *amqp.Publisher
 	npmClient       *npm.Client
 	poller          *npm.Poller
+	httpClient      *http.Client
+}
+
+type pypiLatestResponse struct {
+	Info struct {
+		Version string `json:"version"`
+	} `json:"info"`
+}
+
+type cratesLatestResponse struct {
+	Crate struct {
+		NewestVersion    string `json:"newest_version"`
+		MaxStableVersion string `json:"max_stable_version"`
+	} `json:"crate"`
+}
+
+type goLatestResponse struct {
+	Version string    `json:"Version"`
+	Time    time.Time `json:"Time"`
 }
 
 // Start creates a new package watcher and runs it. Blocks until ctx is cancelled.
@@ -45,6 +69,7 @@ func NewWatcher(deps *services.Deps) (*watcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating AMQP subscriber: %w", err)
 	}
+
 	publisher, err := amqp.NewPublisher(
 		amqp.NewDurableQueueConfig(deps.Config.RabbitMQURL),
 		watermill.NewStdLogger(false, false),
@@ -52,13 +77,18 @@ func NewWatcher(deps *services.Deps) (*watcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("creating AMQP publisher: %w", err)
 	}
+
 	npmClient := npm.NewClient(deps.Config.NPM)
+
 	return &watcher{
 		watchedPackages: make(map[string]map[string]string),
 		subscriber:      subscriber,
 		publisher:       publisher,
 		npmClient:       npmClient,
 		poller:          npm.NewPoller(npmClient),
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}, nil
 }
 
@@ -67,6 +97,7 @@ func (w *watcher) Start(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to package requests: %w", err)
 	}
+
 	go func() {
 		for {
 			select {
@@ -78,24 +109,35 @@ func (w *watcher) Start(ctx context.Context) (err error) {
 					msg.Nack()
 					continue
 				}
+
 				log.Info().
 					Str("ecosystem", req.Ecosystem).
 					Str("identifier", req.Identifier).
 					Msg("Received package request")
-				// Handle the package request by triggering fetching the initial version and adding to watch list
+
 				w.insertWatchedPackage(req.Ecosystem, req.Identifier, "")
 				if err := w.checkVersionAndPublish(ctx, req.Ecosystem, req.Identifier); err != nil {
 					log.Error().
 						Err(err).
+						Str("ecosystem", req.Ecosystem).
 						Str("identifier", req.Identifier).
 						Msg("Failed to check version and publish update")
+
+					// Do not requeue permanent unsupported ecosystem errors forever.
+					if strings.Contains(err.Error(), "unsupported ecosystem") {
+						msg.Ack()
+						continue
+					}
+
 					msg.Nack()
 					continue
 				}
+
 				msg.Ack()
 			}
 		}
 	}()
+
 	go func() {
 		if repErr := w.listenNPMReplicate(ctx); repErr != nil {
 			err = fmt.Errorf("NPM replicate listener error: %w", repErr)
@@ -104,6 +146,7 @@ func (w *watcher) Start(ctx context.Context) (err error) {
 			log.Info().Msg("NPM replicate listener stopped gracefully")
 		}
 	}()
+
 	return
 }
 
@@ -115,37 +158,167 @@ func (w *watcher) insertWatchedPackage(ecosystem, identifier, version string) {
 }
 
 func (w *watcher) checkVersionAndPublish(ctx context.Context, ecosystem, identifier string) error {
-	if ecosystem != "npm" {
-		log.Warn().
-			Str("ecosystem", ecosystem).
-			Str("identifier", identifier).
-			Msg("Unsupported ecosystem, skipping version check")
-		return fmt.Errorf("unsupported ecosystem: %s", ecosystem)
-	}
-	latestVersion, err := w.npmClient.GetLatestVersion(ctx, identifier)
+	latestVersion, err := w.getLatestVersion(ctx, ecosystem, identifier)
 	if err != nil {
-		return fmt.Errorf("failed to fetch latest version for %s: %w", identifier, err)
+		return fmt.Errorf("failed to fetch latest version for %s/%s: %w", ecosystem, identifier, err)
 	}
+
 	currentVersion := w.watchedPackages[ecosystem][identifier]
 	if latestVersion == currentVersion {
 		return nil
 	}
+
 	log.Info().
+		Str("ecosystem", ecosystem).
 		Str("identifier", identifier).
 		Str("old_version", currentVersion).
 		Str("new_version", latestVersion).
 		Msg("New version detected, publishing update")
+
 	w.insertWatchedPackage(ecosystem, identifier, latestVersion)
+
 	updateMsg := messages.PackageUpdated{
 		Ecosystem:  ecosystem,
 		Identifier: identifier,
 		Version:    latestVersion,
 	}
+
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(updateMsg); err != nil {
 		return fmt.Errorf("failed to encode package update message: %w", err)
 	}
+
 	return w.publisher.Publish("spr.package.updated", message.NewMessage(watermill.NewUUID(), buf.Bytes()))
+}
+
+func (w *watcher) getLatestVersion(ctx context.Context, ecosystem, identifier string) (string, error) {
+	switch ecosystem {
+	case "npm":
+		return w.npmClient.GetLatestVersion(ctx, identifier)
+
+	case "pypi":
+		return w.getLatestPyPIVersion(ctx, identifier)
+
+	case "cargo":
+		return w.getLatestCargoVersion(ctx, identifier)
+
+	case "go":
+		return w.getLatestGoVersion(ctx, identifier)
+
+	default:
+		return "", fmt.Errorf("unsupported ecosystem: %s", ecosystem)
+	}
+}
+
+func (w *watcher) getLatestPyPIVersion(ctx context.Context, identifier string) (string, error) {
+	metadataURL := fmt.Sprintf("https://pypi.org/pypi/%s/json", url.PathEscape(identifier))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetching PyPI metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("PyPI package not found: %s", identifier)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("PyPI metadata returned status %d", resp.StatusCode)
+	}
+
+	var metadata pypiLatestResponse
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return "", fmt.Errorf("decoding PyPI metadata: %w", err)
+	}
+
+	if metadata.Info.Version == "" {
+		return "", fmt.Errorf("PyPI metadata did not include latest version for %s", identifier)
+	}
+
+	return metadata.Info.Version, nil
+}
+
+func (w *watcher) getLatestCargoVersion(ctx context.Context, identifier string) (string, error) {
+	metadataURL := fmt.Sprintf("https://crates.io/api/v1/crates/%s", url.PathEscape(identifier))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "secure-package-registry/1.0")
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetching crates.io metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("crate not found: %s", identifier)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("crates.io metadata returned status %d", resp.StatusCode)
+	}
+
+	var metadata cratesLatestResponse
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return "", fmt.Errorf("decoding crates.io metadata: %w", err)
+	}
+
+	if metadata.Crate.MaxStableVersion != "" {
+		return metadata.Crate.MaxStableVersion, nil
+	}
+	if metadata.Crate.NewestVersion != "" {
+		return metadata.Crate.NewestVersion, nil
+	}
+
+	return "", fmt.Errorf("crates.io metadata did not include latest version for %s", identifier)
+}
+
+func (w *watcher) getLatestGoVersion(ctx context.Context, identifier string) (string, error) {
+	modulePath := strings.TrimSpace(identifier)
+	if modulePath == "" {
+		return "", fmt.Errorf("missing Go module path")
+	}
+
+	metadataURL := fmt.Sprintf(
+		"https://proxy.golang.org/%s/@latest",
+		strings.TrimPrefix(modulePath, "/"),
+	)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metadataURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := w.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetching Go module metadata: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("Go module not found: %s", identifier)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("Go module proxy returned status %d", resp.StatusCode)
+	}
+
+	var metadata goLatestResponse
+	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+		return "", fmt.Errorf("decoding Go module metadata: %w", err)
+	}
+
+	if metadata.Version == "" {
+		return "", fmt.Errorf("Go module metadata did not include latest version for %s", identifier)
+	}
+
+	return metadata.Version, nil
 }
 
 func (w watcher) currentWatchedVersion(ecosystem, identifier string) (string, bool) {
@@ -161,17 +334,17 @@ func (w *watcher) listenNPMReplicate(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case update := <-updatesCh:
-			// First ensure that we're actively watching this package before publishing an update
 			_, watching := w.currentWatchedVersion("npm", update.PackageName)
 			if !watching {
 				continue
 			}
-			// Fetch the latest version
+
 			if err := w.checkVersionAndPublish(ctx, "npm", update.PackageName); err != nil {
 				log.Error().
 					Err(err).
@@ -179,7 +352,6 @@ func (w *watcher) listenNPMReplicate(ctx context.Context) error {
 					Msg("Failed to check version and publish update")
 				continue
 			}
-
 		}
 	}
 }

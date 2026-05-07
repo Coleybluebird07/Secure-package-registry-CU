@@ -12,17 +12,13 @@ RUN apt-get update \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Install OSS Rebuild CLI.
 RUN go install github.com/google/oss-rebuild/cmd/oss-rebuild@latest
 
-# Install project dependencies.
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code.
 COPY . .
 
-# Build SPR binary.
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/spr ./cmd/spr
 
 # Runtime stage
@@ -50,7 +46,7 @@ COPY --from=builder /app/spr ./spr
 COPY --from=builder /go/bin/oss-rebuild /usr/local/bin/oss-rebuild
 
 RUN chown -R spr:spr ./spr ./infra ./scripts \
-    && chmod +x ./scripts/oss-rebuild-npm.sh \
+    && chmod +x ./scripts/oss-rebuild-artifact.sh \
     && chmod +x /usr/local/bin/oss-rebuild
 
 USER spr
