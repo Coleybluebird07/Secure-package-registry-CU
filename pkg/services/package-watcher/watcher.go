@@ -222,7 +222,11 @@ func (w *watcher) getLatestPyPIVersion(ctx context.Context, identifier string) (
 	if err != nil {
 		return "", fmt.Errorf("fetching PyPI metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("PyPI package not found: %s", identifier)
@@ -256,7 +260,11 @@ func (w *watcher) getLatestCargoVersion(ctx context.Context, identifier string) 
 	if err != nil {
 		return "", fmt.Errorf("fetching crates.io metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("crate not found: %s", identifier)
@@ -300,13 +308,17 @@ func (w *watcher) getLatestGoVersion(ctx context.Context, identifier string) (st
 	if err != nil {
 		return "", fmt.Errorf("fetching Go module metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("Go module not found: %s", identifier)
+		return "", fmt.Errorf("go module not found: %s", identifier)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Go module proxy returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("go module proxy returned status %d", resp.StatusCode)
 	}
 
 	var metadata goLatestResponse
@@ -315,7 +327,7 @@ func (w *watcher) getLatestGoVersion(ctx context.Context, identifier string) (st
 	}
 
 	if metadata.Version == "" {
-		return "", fmt.Errorf("Go module metadata did not include latest version for %s", identifier)
+		return "", fmt.Errorf("go module metadata did not include latest version for %s", identifier)
 	}
 
 	return metadata.Version, nil

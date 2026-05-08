@@ -8,6 +8,7 @@ image: golang:1.25.6
 variables:
   GIT_DEPTH: 0
   REPRO_BUILD_MIRROR_REPO: "Coleybluebird07/Registry-Reproducible-Builds"
+  GH_RUNNER_MIRROR_REPO: "Coleybluebird07/spr-gh-runner"
 
 mirror_reproducible_build:
   stage: sync_repro_build
@@ -17,11 +18,6 @@ mirror_reproducible_build:
     - |
       if [ -z "$GITHUB_TOKEN" ]; then
         echo "GITHUB_TOKEN is not set; skipping reproducible-build mirror sync."
-        exit 0
-      fi
-    - |
-      if [ -z "$REPRO_BUILD_MIRROR_REPO" ]; then
-        echo "REPRO_BUILD_MIRROR_REPO is not set; skipping reproducible-build mirror sync."
         exit 0
       fi
     - git fetch --all
@@ -34,13 +30,13 @@ sync_runner:
     - main
   script:
     - |
-      if [ -z "$GH_SYNC_TOKEN" ]; then
-        echo "GH_SYNC_TOKEN is not set; skipping spr-gh-runner mirror sync."
+      if [ -z "$GITHUB_TOKEN" ]; then
+        echo "GITHUB_TOKEN is not set; skipping spr-gh-runner mirror sync."
         exit 0
       fi
     - git fetch --all
     - SPLIT_COMMIT=$(git subtree split --prefix=spr-gh-runner)
-    - git push https://oauth2:${GH_SYNC_TOKEN}@github.com/Coleybluebird07/spr-gh-runner.git $SPLIT_COMMIT:refs/heads/main --force
+    - git push https://oauth2:${GITHUB_TOKEN}@github.com/${GH_RUNNER_MIRROR_REPO}.git $SPLIT_COMMIT:refs/heads/main --force
 
 check:
   stage: check

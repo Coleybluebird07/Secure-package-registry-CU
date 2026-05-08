@@ -399,7 +399,11 @@ func downloadOfficialNPMTarball(ctx context.Context, registryURL, packageName, v
 	if err != nil {
 		return "", nil, fmt.Errorf("fetching npm metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", nil, fmt.Errorf("fetching npm metadata returned status %d", resp.StatusCode)
@@ -442,7 +446,11 @@ func downloadOfficialPyPIArtifact(ctx context.Context, packageName, version stri
 	if err != nil {
 		return "", nil, fmt.Errorf("fetching PyPI metadata: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", nil, fmt.Errorf("%w: PyPI package/version not found: %s@%s", errRebuildUnavailable, packageName, version)
@@ -498,7 +506,11 @@ func downloadOfficialCargoArtifact(ctx context.Context, crateName, version strin
 	if err != nil {
 		return "", nil, fmt.Errorf("downloading crates.io artifact: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", nil, fmt.Errorf("%w: crate/version not found: %s@%s", errRebuildUnavailable, crateName, version)
@@ -525,7 +537,11 @@ func downloadURL(ctx context.Context, downloadURL string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("downloading artifact: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warn().Err(err).Msg("Failed to close response body")
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("downloading artifact returned status %d", resp.StatusCode)
@@ -545,7 +561,7 @@ func npmMetadataURL(registryURL, packageName string) (string, error) {
 		return "", fmt.Errorf("invalid npm registry URL: %w", err)
 	}
 
-	escaped := packageName
+	var escaped string
 	if strings.HasPrefix(packageName, "@") {
 		escaped = strings.Replace(packageName, "/", "%2F", 1)
 	} else {
@@ -784,7 +800,11 @@ func readFileWithLimit(path string, maxBytes int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Warn().Err(err).Str("path", path).Msg("Failed to close file")
+		}
+	}()
 
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
 	if err != nil {
@@ -800,11 +820,10 @@ func readFileWithLimit(path string, maxBytes int64) ([]byte, error) {
 
 func rebuildBaseKey(req messages.RebuildRequested) string {
 	return fmt.Sprintf(
-		"rebuild/%s/%s/%s/%s",
+		"rebuild/%s/%s/%s",
 		safePath(req.Ecosystem),
 		safePath(req.Identifier),
 		safePath(req.Version),
-		safePath(req.Source),
 	)
 }
 
