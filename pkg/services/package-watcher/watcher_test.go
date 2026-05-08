@@ -197,7 +197,7 @@ func TestWatcherGetLatestGoVersionNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Go module not found error")
 	}
-	if !strings.Contains(err.Error(), "Go module not found") {
-		t.Fatalf("expected Go module not found error, got %v", err)
+	if !strings.Contains(err.Error(), "go module not found") {
+		t.Fatalf("expected go module not found error, got %v", err)
 	}
 }
