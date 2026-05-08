@@ -13,6 +13,11 @@ mirror_reproducible_build:
   only:
     - branches
   script:
+    - |
+      if [ -z "$GITHUB_TOKEN" ]; then
+        echo "GITHUB_TOKEN is not set; skipping reproducible-build mirror sync."
+        exit 0
+      fi
     - git fetch --all
     - SPLIT_COMMIT=$(git subtree split --prefix=cmd/rep-build)
     - git push https://BenjyRead:${GITHUB_TOKEN}@github.com/BenjyRead/Registry-Reproducible-Builds.git $SPLIT_COMMIT:refs/heads/$CI_COMMIT_REF_NAME --force
@@ -22,6 +27,11 @@ sync_runner:
   only:
     - main
   script:
+    - |
+      if [ -z "$GH_SYNC_TOKEN" ]; then
+        echo "GH_SYNC_TOKEN is not set; skipping spr-gh-runner mirror sync."
+        exit 0
+      fi
     - git fetch --all
     - SPLIT_COMMIT=$(git subtree split --prefix=spr-gh-runner)
     - git push https://luddite-ltd:${GH_SYNC_TOKEN}@github.com/luddite-ltd/spr-gh-runner.git $SPLIT_COMMIT:refs/heads/main --force
