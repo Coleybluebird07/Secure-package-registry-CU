@@ -278,6 +278,7 @@ type OrganizationPackage struct {
 	ID             int32
 	OrganizationID string
 	PackageID      int32
+	SecurityLevel  NullSecurityLevel
 }
 
 type Package struct {
@@ -308,6 +309,7 @@ type PackageVersion struct {
 	MaintainerNotes  pgtype.Text
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	SecurityLevel    NullSecurityLevel
 }
 
 type PackageVersionTag struct {

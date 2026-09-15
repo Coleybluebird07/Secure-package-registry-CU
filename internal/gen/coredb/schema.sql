@@ -68,7 +68,7 @@ CREATE TABLE collection_tasks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     -- Only one active (pending/running) task per package version + source at a time.
-    UNIQUE(package_version_id, source) 
+    UNIQUE(package_version_id, source)
 );
 
 CREATE INDEX idx_collection_tasks_status ON collection_tasks (status);
