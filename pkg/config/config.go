@@ -4,6 +4,7 @@ package config
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -34,6 +35,16 @@ type MinIOConfig struct {
 	Bucket    string
 }
 
+type RebuildConfig struct {
+	OSSRebuildCmd            string
+	DiffoscopeCmd            string
+	WorkDir                  string
+	OSSRebuildTimeout        time.Duration
+	DiffoscopeTimeout        time.Duration
+	MaxRebuildArtifactBytes  int64
+	MaxDiffoscopeReportBytes int64
+}
+
 // This includes configuration required by all microservices. For example, RabbitMQ connection details are required to communicate between the services
 type CoreSvcConfig struct {
 	ExternalPort string
@@ -50,6 +61,7 @@ type CoreConfig struct {
 	NPM          NPMConfig
 	GitHub       GitHubConfig
 	MinIO        MinIOConfig
+	Rebuild      RebuildConfig
 	ReverseProxy ReverseProxyConfig
 }
 
@@ -65,11 +77,25 @@ func NewCoreConfig(modifiers ...modifier) *CoreConfig {
 			ExternalPort: "8080",
 			InternalPort: "8081",
 		},
+		NPM: NPMConfig{
+			RegistryURL:  "https://registry.npmjs.org",
+			ReplicateURL: "https://replicate.npmjs.com",
+			HTTPTimeout:  10 * time.Second,
+		},
 		MinIO: MinIOConfig{
 			Endpoint:  "minio:9000",
 			AccessKey: "minio",
 			SecretKey: "minio_pass",
 			Bucket:    "behavior",
+		},
+		Rebuild: RebuildConfig{
+			OSSRebuildCmd:            "",
+			DiffoscopeCmd:            "diffoscope",
+			WorkDir:                  "/tmp/spr-rebuild",
+			OSSRebuildTimeout:        10 * time.Minute,
+			DiffoscopeTimeout:        2 * time.Minute,
+			MaxRebuildArtifactBytes:  100 * 1024 * 1024,
+			MaxDiffoscopeReportBytes: 50 * 1024 * 1024,
 		},
 		ReverseProxy: ReverseProxyConfig{
 			ExternalURL: "http://localhost:7002",
@@ -91,8 +117,9 @@ func WithEnv() modifier {
 		cfg.ValkeyURL = getEnv("VALKEY_URL", cfg.ValkeyURL)
 		cfg.CoreSvc.ExternalPort = getEnv("EXTERNAL_PORT", cfg.CoreSvc.ExternalPort)
 		cfg.CoreSvc.InternalPort = getEnv("INTERNAL_PORT", cfg.CoreSvc.InternalPort)
-		cfg.NPM.RegistryURL = getEnv("NPM_REGISTRY_URL", "https://registry.npmjs.org")
-		cfg.NPM.ReplicateURL = getEnv("NPM_REPLICATE_URL", "https://replicate.npmjs.com")
+
+		cfg.NPM.RegistryURL = getEnv("NPM_REGISTRY_URL", cfg.NPM.RegistryURL)
+		cfg.NPM.ReplicateURL = getEnv("NPM_REPLICATE_URL", cfg.NPM.ReplicateURL)
 		if timeoutStr := getEnv("NPM_HTTP_TIMEOUT", "10s"); timeoutStr != "" {
 			if timeout, err := time.ParseDuration(timeoutStr); err == nil {
 				cfg.NPM.HTTPTimeout = timeout
@@ -100,10 +127,12 @@ func WithEnv() modifier {
 				cfg.NPM.HTTPTimeout = 10 * time.Second
 			}
 		}
+
 		cfg.GitHub.Token = getEnv("GITHUB_TOKEN", "")
 		cfg.GitHub.Owner = getEnv("GITHUB_OWNER", "")
 		cfg.GitHub.Repo = getEnv("GITHUB_REPO", "")
 		cfg.GitHub.WorkflowFile = getEnv("GITHUB_WORKFLOW_FILE", "collect-behavior.yml")
+
 		cfg.MinIO.Endpoint = getEnv("MINIO_ENDPOINT", cfg.MinIO.Endpoint)
 		cfg.MinIO.AccessKey = getEnv("MINIO_ACCESS_KEY", cfg.MinIO.AccessKey)
 		cfg.MinIO.SecretKey = getEnv("MINIO_SECRET_KEY", cfg.MinIO.SecretKey)
@@ -111,6 +140,14 @@ func WithEnv() modifier {
 		if sslStr := getEnv("MINIO_USE_SSL", ""); sslStr != "" {
 			cfg.MinIO.UseSSL = sslStr == "true" || sslStr == "1"
 		}
+
+		cfg.Rebuild.OSSRebuildCmd = getEnv("OSS_REBUILD_CMD", cfg.Rebuild.OSSRebuildCmd)
+		cfg.Rebuild.DiffoscopeCmd = getEnv("DIFFOSCOPE_CMD", cfg.Rebuild.DiffoscopeCmd)
+		cfg.Rebuild.WorkDir = getEnv("REBUILD_WORK_DIR", cfg.Rebuild.WorkDir)
+		cfg.Rebuild.OSSRebuildTimeout = getEnvDuration("OSS_REBUILD_TIMEOUT", cfg.Rebuild.OSSRebuildTimeout)
+		cfg.Rebuild.DiffoscopeTimeout = getEnvDuration("DIFFOSCOPE_TIMEOUT", cfg.Rebuild.DiffoscopeTimeout)
+		cfg.Rebuild.MaxRebuildArtifactBytes = getEnvInt64("MAX_REBUILD_ARTIFACT_SIZE", cfg.Rebuild.MaxRebuildArtifactBytes)
+		cfg.Rebuild.MaxDiffoscopeReportBytes = getEnvInt64("MAX_DIFFOSCOPE_REPORT_SIZE", cfg.Rebuild.MaxDiffoscopeReportBytes)
 
 		cfg.ReverseProxy.ExternalURL = getEnv("REVERSE_PROXY_EXTERNAL_URL", cfg.ReverseProxy.ExternalURL)
 
@@ -125,4 +162,32 @@ func getEnv(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
+	value := getEnv(key, "")
+	if value == "" {
+		return defaultValue
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
+}
+
+func getEnvInt64(key string, defaultValue int64) int64 {
+	value := getEnv(key, "")
+	if value == "" {
+		return defaultValue
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return defaultValue
+	}
+
+	return parsed
 }

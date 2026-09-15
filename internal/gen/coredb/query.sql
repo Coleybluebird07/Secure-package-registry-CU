@@ -213,6 +213,188 @@ WHERE p.ecosystem = $1
   AND ct.artifact_key IS NOT NULL
 LIMIT 1;
 
+-- Rebuild verification task queries
+
+-- name: InsertRebuildTask :one
+-- Inserts a new rebuild verification task for a package version + source.
+-- Returns the new row. If a task already exists for this combination,
+-- does nothing and returns nothing.
+INSERT INTO rebuild_tasks (package_version_id, source, status)
+VALUES ($1, $2, 'pending')
+ON CONFLICT (package_version_id, source) DO NOTHING
+RETURNING id, package_version_id, source, status, created_at;
+
+-- name: HasActiveRebuildTask :one
+-- Checks whether an active rebuild task exists for the given package version and source.
+SELECT EXISTS(
+    SELECT 1 FROM rebuild_tasks
+    WHERE package_version_id = $1
+      AND source = $2
+      AND status IN ('pending', 'running')
+) AS active;
+
+-- name: UpdateRebuildTaskStatus :exec
+UPDATE rebuild_tasks
+SET status = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;
+
+-- name: UpdateRebuildTaskRunning :exec
+UPDATE rebuild_tasks
+SET status = 'running',
+    started_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;
+
+-- name: UpdateRebuildTaskHeartbeat :exec
+UPDATE rebuild_tasks
+SET heartbeat_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;
+
+-- name: UpdateRebuildTaskSucceeded :exec
+UPDATE rebuild_tasks
+SET status = 'succeeded',
+    matched = $2,
+    official_artifact_bucket = $3,
+    official_artifact_key = $4,
+    rebuilt_artifact_bucket = $5,
+    rebuilt_artifact_key = $6,
+    diffoscope_bucket = $7,
+    diffoscope_key = $8,
+    logs_bucket = $9,
+    logs_key = $10,
+    metadata_bucket = $11,
+    metadata_key = $12,
+    completed_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;
+
+-- name: UpdateRebuildTaskUnavailable :exec
+UPDATE rebuild_tasks
+SET status = 'unavailable',
+    failure_reason = $2,
+    completed_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;
+
+-- name: UpdateRebuildTaskFailed :exec
+UPDATE rebuild_tasks
+SET status = 'failed',
+    failure_reason = $2,
+    completed_at = CURRENT_TIMESTAMP,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1;
+
+-- name: ResetRebuildTask :exec
+-- Resets a failed/cancelled/unavailable task back to pending for retry.
+UPDATE rebuild_tasks
+SET status = 'pending',
+    matched = NULL,
+    official_artifact_bucket = NULL,
+    official_artifact_key = NULL,
+    rebuilt_artifact_bucket = NULL,
+    rebuilt_artifact_key = NULL,
+    diffoscope_bucket = NULL,
+    diffoscope_key = NULL,
+    logs_bucket = NULL,
+    logs_key = NULL,
+    metadata_bucket = NULL,
+    metadata_key = NULL,
+    started_at = NULL,
+    heartbeat_at = NULL,
+    completed_at = NULL,
+    failure_reason = NULL,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+  AND status IN ('failed', 'cancelled', 'unavailable');
+
+-- name: GetRebuildTask :one
+SELECT
+    id,
+    package_version_id,
+    source,
+    status,
+    matched,
+    official_artifact_bucket,
+    official_artifact_key,
+    rebuilt_artifact_bucket,
+    rebuilt_artifact_key,
+    diffoscope_bucket,
+    diffoscope_key,
+    logs_bucket,
+    logs_key,
+    metadata_bucket,
+    metadata_key,
+    started_at,
+    heartbeat_at,
+    completed_at,
+    failure_reason,
+    created_at,
+    updated_at
+FROM rebuild_tasks
+WHERE id = $1;
+
+-- name: ListRebuildTasks :many
+-- Lists rebuild tasks with package context, optionally filtered by ecosystem.
+SELECT
+    rt.id,
+    rt.source,
+    rt.status,
+    rt.matched,
+    rt.diffoscope_bucket,
+    rt.diffoscope_key,
+    rt.logs_bucket,
+    rt.logs_key,
+    rt.metadata_bucket,
+    rt.metadata_key,
+    rt.failure_reason,
+    rt.started_at,
+    rt.completed_at,
+    rt.created_at,
+    p.identifier,
+    p.ecosystem::text,
+    pv.version
+FROM rebuild_tasks rt
+JOIN package_versions pv ON pv.id = rt.package_version_id
+JOIN packages p ON p.id = pv.package_id
+WHERE (sqlc.narg(ecosystem)::ECOSYSTEM IS NULL OR p.ecosystem = sqlc.narg(ecosystem)::ECOSYSTEM)
+ORDER BY rt.created_at DESC
+LIMIT sqlc.arg(page_size) OFFSET (sqlc.arg(page) - 1) * sqlc.arg(page_size);
+
+-- name: GetRebuildTaskForPackageVersion :one
+-- Finds a rebuild task for a given ecosystem, package identifier, version, and source.
+SELECT
+    rt.id,
+    rt.package_version_id,
+    rt.source,
+    rt.status,
+    rt.matched,
+    rt.official_artifact_bucket,
+    rt.official_artifact_key,
+    rt.rebuilt_artifact_bucket,
+    rt.rebuilt_artifact_key,
+    rt.diffoscope_bucket,
+    rt.diffoscope_key,
+    rt.logs_bucket,
+    rt.logs_key,
+    rt.metadata_bucket,
+    rt.metadata_key,
+    rt.started_at,
+    rt.heartbeat_at,
+    rt.completed_at,
+    rt.failure_reason,
+    rt.created_at,
+    rt.updated_at
+FROM rebuild_tasks rt
+JOIN package_versions pv ON pv.id = rt.package_version_id
+JOIN packages p ON p.id = pv.package_id
+WHERE p.ecosystem = $1
+  AND p.identifier = $2
+  AND pv.version = $3
+  AND rt.source = $4
+LIMIT 1;
+
 -- Auth queries
 
 -- name: GetAPIKeyOwner :one

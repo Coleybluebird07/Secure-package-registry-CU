@@ -4,21 +4,21 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Package name (e.g., lodash)'
+        description: "Package name (e.g., lodash)"
         required: true
         type: string
       version:
-        description: 'Package version (e.g., 4.17.21)'
+        description: "Package version (e.g., 4.17.21)"
         required: true
         type: string
       registry:
-        description: 'Registry preset'
+        description: "Registry preset"
         required: true
         type: choice
         options:
-          - gitea
           - npm
-        default: gitea
+          - gitea
+        default: npm
 
 env:
   GITEA_REGISTRY_URL: https://git.duti.dev
@@ -32,15 +32,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download test-generator from releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Downloading test-generator from releases..."
-          wget -q "https://github.com/${{ github.repository }}/releases/download/${{ env.TOOLS_RELEASE }}/test-generator" -O /tmp/test-generator
+          echo "Downloading release assets..."
+          gh release download "${{ env.TOOLS_RELEASE }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "test-generator" \
+            --pattern "templates.tar.gz" \
+            --dir /tmp \
+            --clobber
+
           chmod +x /tmp/test-generator
           echo "✅ test-generator downloaded"
           
-          echo "Downloading templates..."
+          echo "Extracting templates..."
           mkdir -p /tmp/templates
-          wget -q "https://github.com/${{ github.repository }}/releases/download/${{ env.TOOLS_RELEASE }}/templates.tar.gz" -O /tmp/templates.tar.gz
           tar -xzf /tmp/templates.tar.gz -C /tmp/templates
           echo "✅ Templates extracted"
           
@@ -80,6 +87,9 @@ jobs:
               exit 1
               ;;
           esac
+
+          echo "Selected registry: ${{ inputs.registry }}"
+          echo "Registry URL: $(cat "$GITHUB_OUTPUT" | grep '^url=' | cut -d= -f2-)"
 
       - name: Generate test package
         run: |
@@ -198,6 +208,7 @@ jobs:
           sudo kill "$TRACEE_PID" 2>/dev/null || true
           wait "$TRACEE_PID" 2>/dev/null || true
           sleep 2
+          sudo mkdir -p /tmp/tracee-out
           sudo chmod -R 777 /tmp/tracee-out/
           echo "Tracee output contents:"
           ls -la /tmp/tracee-out/ || echo "No output directory"
@@ -224,4 +235,3 @@ jobs:
           name: behavior-${{ steps.normalize.outputs.normalized }}-${{ inputs.version }}-${{ github.run_id }}
           path: /tmp/tracee-out/behavior.jsonl
           retention-days: 1
-

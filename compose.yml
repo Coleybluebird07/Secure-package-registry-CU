@@ -3,17 +3,15 @@ services:
     image: docker.io/rabbitmq:4-management
     ports:
       - "127.0.0.1:10001:15672"
-      - "127.0.0.1:10002:5672" # For testing purposes. Comment out in prod.
+      - "127.0.0.1:10002:5672"
     environment:
       RABBITMQ_DEFAULT_USER: "admin"
       RABBITMQ_DEFAULT_PASS: "admin"
 
-  ## ---------- Local Gitea ----------
-  ## Uncomment gitea + gitea_db (and comment out gitea-remote) to use a local
-  ## Gitea instance. The entrypoint creates accounts, generates tokens, and
-  ## seeds the gitea:config key in Valkey automatically.
   gitea:
-    image: docker.gitea.com/gitea:1.25.4
+    build:
+      context: .
+      dockerfile: infra/gitea/Containerfile
     environment:
       - USER_UID=1000
       - USER_GID=1000
@@ -24,20 +22,16 @@ services:
       - GITEA__database__PASSWD=gitea
       - GITEA__security__INSTALL_LOCK=true
       - GITEA_CUSTOM=/data/gitea/custom
-
-    volumes:
-      # Uncomment when necessary. No persistence necessary for testing phase
-      # - ./data/gitea:/data:Z
-      - ./infra/gitea-custom/:/data/gitea/custom:ro
-      - ./infra/gitea/setup.sh:/gitea-setup.sh:ro
     ports:
-      - "127.0.0.1:10005:3000" # Gitea web UI (3rd party internal)
-    entrypoint: ["/bin/sh","-c"]
+      - "127.0.0.1:10005:3000"
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - | # Will run every time on startup but commands are idempotent so no worries
+      - |
         apk update
         apk add valkey-cli jq
-        cat /gitea-setup.sh >> /etc/s6/gitea/setup
+        mkdir -p /data/gitea/custom/conf
+        cp /opt/spr-gitea/app.ini /data/gitea/custom/conf/app.ini
+        cat /opt/spr-gitea/setup.sh >> /etc/s6/gitea/setup
         /usr/bin/entrypoint /usr/bin/s6-svscan /etc/s6
     depends_on:
       gitea_db:
@@ -47,53 +41,15 @@ services:
       valkey:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli -h valkey -p 6379 EXISTS gitea:config | grep -q 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "valkey-cli -h valkey -p 6379 EXISTS gitea:config | grep -q 1",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 10s
-
-  ## ---------- Remote Gitea ----------
-  ## Seeds credentials from .env into the gitea:config Valkey key.
-  ## Comment this out and uncomment the gitea + gitea_db services above
-  ## to switch back to a local Gitea instance.
-  # gitea-remote:
-  #   image: docker.io/valkey/valkey:9.0.2-alpine
-  #   depends_on:
-  #     valkey:
-  #       condition: service_healthy
-  #   environment:
-  #     - REMOTE_GITEA_BASE_URL=${REMOTE_GITEA_BASE_URL}
-  #     - REMOTE_GITEA_ADMIN_USER=${REMOTE_GITEA_ADMIN_USER}
-  #     - REMOTE_GITEA_ADMIN_TOKEN=${REMOTE_GITEA_ADMIN_TOKEN}
-  #     - REMOTE_GITEA_REGISTRY_USER=${REMOTE_GITEA_REGISTRY_USER}
-  #     - REMOTE_GITEA_REGISTRY_TOKEN=${REMOTE_GITEA_REGISTRY_TOKEN}
-  #     - REMOTE_GITEA_SANDBOX_USER=${REMOTE_GITEA_SANDBOX_USER}
-  #     - REMOTE_GITEA_SANDBOX_TOKEN=${REMOTE_GITEA_SANDBOX_TOKEN}
-  #   entrypoint: ["/bin/sh", "-c"]
-  #   # $$ escapes are required — podman-compose/docker-compose interpolates
-  #   # $VARNAME in YAML values. $$ produces a literal $ in the rendered script.
-  #   command:
-  #     - |
-  #       apk add --no-cache jq >/dev/null 2>&1
-  #       GITEA_CONFIG=$$(jq -nc \
-  #         --arg base_url "$$REMOTE_GITEA_BASE_URL" \
-  #         --arg admin_user "$$REMOTE_GITEA_ADMIN_USER" \
-  #         --arg admin_token "$$REMOTE_GITEA_ADMIN_TOKEN" \
-  #         --arg registry_user "$$REMOTE_GITEA_REGISTRY_USER" \
-  #         --arg registry_token "$$REMOTE_GITEA_REGISTRY_TOKEN" \
-  #         --arg sandbox_user "$$REMOTE_GITEA_SANDBOX_USER" \
-  #         --arg sandbox_token "$$REMOTE_GITEA_SANDBOX_TOKEN" \
-  #         '{
-  #           "base_url": $$base_url,
-  #           "accounts": {
-  #             "admin":    { "username": $$admin_user,    "token": $$admin_token },
-  #             "registry": { "username": $$registry_user, "token": $$registry_token },
-  #             "sandbox":  { "username": $$sandbox_user,  "token": $$sandbox_token }
-  #           }
-  #         }')
-  #       valkey-cli -h valkey -p 6379 SET gitea:config "$$GITEA_CONFIG" NX
-  #       echo "Remote Gitea config seeded into Valkey"
 
   minio:
     image: docker.io/minio/minio:latest
@@ -105,14 +61,12 @@ services:
     ports:
       - "127.0.0.1:10004:9001"
       - "127.0.0.1:10003:9000"
-    # volumes:
-      # Uncomment when necessary
-      # - ./data/minio:/data:Z
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s
       retries: 5
+
   minio-init:
     image: docker.io/minio/mc:latest
     depends_on:
@@ -128,18 +82,13 @@ services:
         mc cp /seed/safe.jsonl spr/behavior/behavior/baseline/behavior.jsonl
         echo "Baseline seeded successfully"
 
-  ## ---------- Local Gitea DB ----------
-  ## Uncomment when using local Gitea (see above).
   gitea_db:
     image: docker.io/library/postgres:18
     restart: always
     environment:
-      - POSTGRES_USER=gitea # TODO: Use environment variables
+      - POSTGRES_USER=gitea
       - POSTGRES_PASSWORD=gitea
       - POSTGRES_DB=gitea
-    # volumes:
-      # Uncomment when necessary
-      # - ./data/postgres:/var/lib/postgresql:Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gitea -d gitea -h localhost"]
       interval: 5s
@@ -155,9 +104,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    # volumes:
-      # Uncomment when necessary
-      # - ./data/valkey:/data:Z
+
   core_db:
     image: docker.io/library/postgres:18
     restart: always
@@ -167,18 +114,17 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=core
-    # volumes:
-      # Uncomment when necessary
-      # - ./data/core_db:/var/lib/postgresql/data:Z
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d core -h localhost"]
       interval: 5s
       timeout: 5s
       retries: 5
+
   spr:
     build:
       context: .
       dockerfile: cmd/spr/Containerfile
+    user: root
     depends_on:
       core_db:
         condition: service_healthy
@@ -186,16 +132,15 @@ services:
         condition: service_started
       valkey:
         condition: service_healthy
-      # For local Gitea: uncomment gitea, comment out gitea-remote
       gitea:
         condition: service_healthy
-      # gitea-remote:
-      #   condition: service_completed_successfully
       minio:
         condition: service_healthy
     ports:
-      - "127.0.0.1:7002:7002" # reg-proxy (public)
-      - "127.0.0.1:20001:8081" # internal API (1st party internal)
+      - "127.0.0.1:7002:7002"
+      - "127.0.0.1:20001:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - LOG_LEVEL=info
       - EXTERNAL_PORT=8080
@@ -210,6 +155,13 @@ services:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - GITHUB_OWNER=${GITHUB_OWNER:-}
       - GITHUB_REPO=${GITHUB_REPO:-}
+      - OSS_REBUILD_CMD=${OSS_REBUILD_CMD:-/app/scripts/oss-rebuild-artifact.sh}
+      - DIFFOSCOPE_CMD=${DIFFOSCOPE_CMD:-diffoscope}
+      - REBUILD_WORK_DIR=${REBUILD_WORK_DIR:-/tmp/spr-rebuild}
+      - OSS_REBUILD_TIMEOUT=${OSS_REBUILD_TIMEOUT:-10m}
+      - DIFFOSCOPE_TIMEOUT=${DIFFOSCOPE_TIMEOUT:-2m}
+      - MAX_REBUILD_ARTIFACT_SIZE=${MAX_REBUILD_ARTIFACT_SIZE:-104857600}
+      - MAX_DIFFOSCOPE_REPORT_SIZE=${MAX_DIFFOSCOPE_REPORT_SIZE:-52428800}
       - SPR_MOCK=true
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
@@ -224,9 +176,19 @@ services:
       dockerfile: Containerfile
       args:
         PUBLIC_HOME_BASE_URL: ${PUBLIC_HOME_BASE_URL:-http://localhost:7003}
+        PUBLIC_DASHBOARD_BASE_URL: ${PUBLIC_DASHBOARD_BASE_URL:-http://localhost:7001}
     environment:
       - PORT=3000
       - HOST=0.0.0.0
+      - POSTGRES_HOST=core_db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=core
+      - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-http://localhost:7001,http://127.0.0.1:7001}
+    depends_on:
+      core_db:
+        condition: service_healthy
     restart: unless-stopped
 
   home-ui:
@@ -236,9 +198,9 @@ services:
       args:
         PUBLIC_DASHBOARD_BASE_URL: ${PUBLIC_DASHBOARD_BASE_URL:-http://localhost:7001}
     ports:
-      - '127.0.0.1:7003:3000'
+      - "127.0.0.1:7003:3000"
     healthcheck:
-      test: ['CMD', 'wget', '-q', '--spider', 'http://localhost:3000/']
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -248,6 +210,19 @@ services:
     image: docker.io/caddy:2-alpine
     ports:
       - "127.0.0.1:7001:8000"
-    volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        cat > /tmp/Caddyfile <<'EOF'
+        :8000 {
+          handle /api/* {
+            reverse_proxy spr:8080
+          }
+
+          handle {
+            reverse_proxy dashboard-ui:3000
+          }
+        }
+        EOF
+        caddy run --config /tmp/Caddyfile --adapter caddyfile
     restart: unless-stopped

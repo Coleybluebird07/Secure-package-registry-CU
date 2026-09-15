@@ -7,6 +7,21 @@ export type CollectionTaskStatus =
 	| "failed"
 	| "cancelled";
 
+export type RebuildTaskStatus =
+	| "pending"
+	| "running"
+	| "succeeded"
+	| "failed"
+	| "cancelled"
+	| "unavailable";
+
+export type RebuildArtifactKind =
+	| "official"
+	| "rebuilt"
+	| "diffoscope"
+	| "logs"
+	| "metadata";
+
 export interface Package {
 	id: number;
 	identifier: string;
@@ -33,6 +48,76 @@ export interface CollectionTask {
 	started_at?: string;
 	completed_at?: string;
 	created_at: string;
+}
+
+export interface RebuildTask {
+	id: number;
+	identifier: string;
+	ecosystem: string;
+	version: string;
+	source: string;
+	status: RebuildTaskStatus;
+	matched?: boolean;
+	failure_reason?: string;
+	has_diffoscope: boolean;
+	has_logs: boolean;
+	has_metadata: boolean;
+	started_at?: string;
+	completed_at?: string;
+	created_at: string;
+}
+
+export interface RebuildTaskDetail {
+	id: number;
+	package_version_id: number;
+	source: string;
+	status: RebuildTaskStatus;
+	matched?: boolean;
+	failure_reason?: string;
+	has_official_artifact: boolean;
+	has_rebuilt_artifact: boolean;
+	has_diffoscope: boolean;
+	has_logs: boolean;
+	has_metadata: boolean;
+	official_artifact_url?: string;
+	rebuilt_artifact_url?: string;
+	diffoscope_url?: string;
+	logs_url?: string;
+	metadata_url?: string;
+	started_at?: string;
+	heartbeat_at?: string;
+	completed_at?: string;
+	created_at: string;
+	updated_at: string;
+}
+
+export interface RebuildMetadata {
+	task_id: number;
+	ecosystem: string;
+	package: string;
+	version: string;
+	source: string;
+	matched: boolean;
+	official_sha256: string;
+	rebuilt_sha256?: string;
+	official_tarball: string;
+	generated_at: string;
+}
+
+export interface TriggerRebuildRequest {
+	version?: string;
+	source?: string;
+}
+
+export interface TriggerRebuildResponse {
+	task_id: number;
+	identifier: string;
+	ecosystem: string;
+	version: string;
+	source: string;
+	status: string;
+	retried: boolean;
+	already_active: boolean;
 }
 
 export interface ListPackagesResponse {
@@ -65,6 +150,10 @@ export interface TriggerScanResponse {
 
 export interface ListTasksResponse {
 	items: CollectionTask[];
+}
+
+export interface ListRebuildTasksResponse {
+	items: RebuildTask[];
 }
 
 // Behavioral analysis types — mirrors Go pkg/behavior types

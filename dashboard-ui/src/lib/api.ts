@@ -3,11 +3,16 @@ import type {
 	AddPackageResponse,
 	Ecosystem,
 	ListPackagesResponse,
+	ListRebuildTasksResponse,
 	ListTasksResponse,
 	PackageVersion,
 	PackageVersionDetail,
 	ProcessTree,
+	RebuildArtifactKind,
+	RebuildTaskDetail,
 	SearchResult,
+	TriggerRebuildRequest,
+	TriggerRebuildResponse,
 	TriggerScanRequest,
 	TriggerScanResponse,
 } from "$lib/types/api.js";
@@ -106,6 +111,7 @@ export const tasksAPI = {
 	downloadArtifact: (taskId: number): Promise<Response> => {
 		return fetch(`${API_BASE}/admin/tasks/${taskId}/artifact`);
 	},
+
 	list: (params?: {
 		ecosystem?: Ecosystem;
 		page?: number;
@@ -123,6 +129,98 @@ export const tasksAPI = {
 			: `${API_BASE}/admin/tasks`;
 
 		return fetchJSON(url);
+	},
+};
+
+export const rebuildAPI = {
+	artifactURL: (taskId: number, kind: RebuildArtifactKind): string => {
+		return `${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`;
+	},
+
+	downloadArtifact: (
+		taskId: number,
+		kind: RebuildArtifactKind,
+	): Promise<Response> => {
+		return fetch(`${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`);
+	},
+
+	getArtifactBlob: async (
+		taskId: number,
+		kind: RebuildArtifactKind,
+	): Promise<Blob> => {
+		const response = await fetch(
+			`${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`,
+		);
+
+		if (!response.ok) {
+			throw new APIError(response.status, `Failed to fetch ${kind} artifact`);
+		}
+
+		return response.blob();
+	},
+
+	getArtifactText: async (
+		taskId: number,
+		kind: RebuildArtifactKind,
+	): Promise<string> => {
+		const response = await fetch(
+			`${API_BASE}/admin/rebuild-tasks/${taskId}/artifact/${kind}`,
+		);
+
+		if (!response.ok) {
+			throw new APIError(response.status, `Failed to fetch ${kind} artifact`);
+		}
+
+		return response.text();
+	},
+
+	getForPackage: (
+		ecosystem: string,
+		identifier: string,
+		version: string,
+		source = "oss-rebuild",
+	): Promise<RebuildTaskDetail> => {
+		const params = new URLSearchParams({
+			source,
+			version,
+		});
+
+		return fetchJSON(
+			`${API_BASE}/admin/packages/${encodeURIComponent(ecosystem)}/${encodeURIComponent(identifier)}/rebuild?${params.toString()}`,
+		);
+	},
+
+	list: (params?: {
+		ecosystem?: Ecosystem;
+		page?: number;
+		page_size?: number;
+	}): Promise<ListRebuildTasksResponse> => {
+		const searchParams = new URLSearchParams();
+		if (params?.ecosystem) searchParams.set("ecosystem", params.ecosystem);
+		if (params?.page) searchParams.set("page", params.page.toString());
+		if (params?.page_size)
+			searchParams.set("page_size", params.page_size.toString());
+
+		const queryString = searchParams.toString();
+		const url = queryString
+			? `${API_BASE}/admin/rebuild-tasks?${queryString}`
+			: `${API_BASE}/admin/rebuild-tasks`;
+
+		return fetchJSON(url);
+	},
+
+	trigger: (
+		ecosystem: string,
+		identifier: string,
+		data: TriggerRebuildRequest,
+	): Promise<TriggerRebuildResponse> => {
+		return fetchJSON(
+			`${API_BASE}/admin/packages/${encodeURIComponent(ecosystem)}/${encodeURIComponent(identifier)}/rebuild`,
+			{
+				body: JSON.stringify(data),
+				method: "POST",
+			},
+		);
 	},
 };
 
@@ -153,4 +251,9 @@ export const searchAPI = {
 	},
 };
 
-export type { CollectionTaskStatus, Ecosystem } from "$lib/types/api.js";
+export type {
+	CollectionTaskStatus,
+	Ecosystem,
+	RebuildArtifactKind,
+	RebuildTaskStatus,
+} from "$lib/types/api.js";

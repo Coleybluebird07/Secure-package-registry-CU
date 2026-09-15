@@ -1,49 +1,21 @@
-# Git
-.git/
-.jj/
+.git
 .gitignore
-.gitkeep
-.gitlab-ci.yml
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+**/node_modules
+**/.svelte-kit
+**/build
+**/dist
+**/.vite
+**/.cache
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+data
+tmp
 *.log
 
-# Environment
-.env*
+.DS_Store
+.env
+.env.local
 
-# Go build artifacts
-*.test
-*.out
-/bin
-
-# Frontend build artifacts (from dashboard-ui)
-node_modules/
-dist/
-.output
-.svelte-kit
-/build
-
-# Data directories (from compose.yml)
-data/
-
-# Documentation
-*.md
-rfcs/
-
-# Tests (optional, to reduce context)
-*_test.go
-testdata/
-
-# Container files themselves
-**/Containerfile
-.dockerignore
+dashboard-ui
+home-ui
+spr-gh-runner

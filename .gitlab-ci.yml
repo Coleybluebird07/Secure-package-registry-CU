@@ -7,32 +7,42 @@ image: golang:1.25.6
 
 variables:
   GIT_DEPTH: 0
+  REPRO_BUILD_MIRROR_REPO: "Coleybluebird07/Registry-Reproducible-Builds"
+  GH_RUNNER_MIRROR_REPO: "Coleybluebird07/spr-gh-runner"
 
 mirror_reproducible_build:
   stage: sync_repro_build
   only:
     - branches
   script:
+    - |
+      if [ -z "$GITHUB_TOKEN" ]; then
+        echo "GITHUB_TOKEN is not set; skipping reproducible-build mirror sync."
+        exit 0
+      fi
     - git fetch --all
     - SPLIT_COMMIT=$(git subtree split --prefix=cmd/rep-build)
-    - git push https://BenjyRead:${GITHUB_TOKEN}@github.com/BenjyRead/Registry-Reproducible-Builds.git $SPLIT_COMMIT:refs/heads/$CI_COMMIT_REF_NAME --force
+    - git push https://oauth2:${GITHUB_TOKEN}@github.com/${REPRO_BUILD_MIRROR_REPO}.git $SPLIT_COMMIT:refs/heads/$CI_COMMIT_REF_NAME --force
 
 sync_runner:
   stage: sync_gh_runner
   only:
     - main
   script:
+    - |
+      if [ -z "$GITHUB_TOKEN" ]; then
+        echo "GITHUB_TOKEN is not set; skipping spr-gh-runner mirror sync."
+        exit 0
+      fi
     - git fetch --all
     - SPLIT_COMMIT=$(git subtree split --prefix=spr-gh-runner)
-    - git push https://luddite-ltd:${GH_SYNC_TOKEN}@github.com/luddite-ltd/spr-gh-runner.git $SPLIT_COMMIT:refs/heads/main --force
+    - git push https://oauth2:${GITHUB_TOKEN}@github.com/${GH_RUNNER_MIRROR_REPO}.git $SPLIT_COMMIT:refs/heads/main --force
 
 check:
+  stage: check
   variables:
     PUBLIC_HOME_BASE_URL: "localhost:5173"
     PUBLIC_DASHBOARD_BASE_URL: "localhost:5174"
-
-  stage: check
-
   script:
     - apt update
     - apt install -y just unzip
