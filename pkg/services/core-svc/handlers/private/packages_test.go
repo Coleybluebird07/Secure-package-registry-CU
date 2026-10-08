@@ -13,159 +13,18 @@ import (
 	"git.duti.dev/secure-package-registry/internal/messages"
 	"git.duti.dev/secure-package-registry/pkg/services/core-svc/handlers/private"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/jackc/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 type mockQuerier struct {
-	insertPackageFn           func(ctx context.Context, arg coredb.InsertPackageParams) (int32, error)
-	listPackagesByEcosystemFn func(ctx context.Context, ecosystem coredb.Ecosystem) ([]coredb.ListPackagesByEcosystemRow, error)
+	coredb.Querier
+	insertPackageFn func(context.Context, coredb.InsertPackageParams) (coredb.InsertPackageRow, error)
 }
 
-func (m *mockQuerier) InsertPackage(ctx context.Context, arg coredb.InsertPackageParams) (int32, error) {
+func (m *mockQuerier) InsertPackage(ctx context.Context, arg coredb.InsertPackageParams) (coredb.InsertPackageRow, error) {
 	return m.insertPackageFn(ctx, arg)
-}
-
-func (m *mockQuerier) ListPackagesByEcosystem(ctx context.Context, ecosystem coredb.Ecosystem) ([]coredb.ListPackagesByEcosystemRow, error) {
-	return m.listPackagesByEcosystemFn(ctx, ecosystem)
-}
-
-func (m *mockQuerier) GetPackageVersion(context.Context, coredb.GetPackageVersionParams) (coredb.GetPackageVersionRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetPackageVersionTags(context.Context, coredb.GetPackageVersionTagsParams) ([]coredb.GetPackageVersionTagsRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) InsertPackageTag(context.Context, coredb.InsertPackageTagParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) InsertPackageVersion(context.Context, coredb.InsertPackageVersionParams) (int32, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) InsertTagType(context.Context, coredb.InsertTagTypeParams) (int32, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) ListPackageVersions(context.Context, int32) ([]string, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) SearchPackages(context.Context, coredb.SearchPackagesParams) ([]coredb.SearchPackagesRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdatePackageLatestVersion(context.Context, coredb.UpdatePackageLatestVersionParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetPackageByEcosystemAndIdentifier(context.Context, coredb.GetPackageByEcosystemAndIdentifierParams) (coredb.GetPackageByEcosystemAndIdentifierRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) HasActiveCollectionTask(context.Context, coredb.HasActiveCollectionTaskParams) (bool, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) InsertCollectionTask(context.Context, coredb.InsertCollectionTaskParams) (coredb.InsertCollectionTaskRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) ResetCollectionTask(context.Context, int32) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateCollectionTaskFailed(context.Context, coredb.UpdateCollectionTaskFailedParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateCollectionTaskHeartbeat(context.Context, int32) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateCollectionTaskRunning(context.Context, coredb.UpdateCollectionTaskRunningParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateCollectionTaskStatus(context.Context, coredb.UpdateCollectionTaskStatusParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateCollectionTaskSucceeded(context.Context, coredb.UpdateCollectionTaskSucceededParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetCollectionTask(context.Context, int32) (coredb.CollectionTask, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) ListCollectionTasks(context.Context, coredb.ListCollectionTasksParams) ([]coredb.ListCollectionTasksRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetSucceededCollectionTask(context.Context, coredb.GetSucceededCollectionTaskParams) (coredb.GetSucceededCollectionTaskRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) InsertRebuildTask(context.Context, coredb.InsertRebuildTaskParams) (coredb.InsertRebuildTaskRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) HasActiveRebuildTask(context.Context, coredb.HasActiveRebuildTaskParams) (bool, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateRebuildTaskStatus(context.Context, coredb.UpdateRebuildTaskStatusParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateRebuildTaskRunning(context.Context, int32) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateRebuildTaskHeartbeat(context.Context, int32) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateRebuildTaskSucceeded(context.Context, coredb.UpdateRebuildTaskSucceededParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateRebuildTaskUnavailable(context.Context, coredb.UpdateRebuildTaskUnavailableParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) UpdateRebuildTaskFailed(context.Context, coredb.UpdateRebuildTaskFailedParams) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) ResetRebuildTask(context.Context, int32) error {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetRebuildTask(context.Context, int32) (coredb.RebuildTask, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) ListRebuildTasks(context.Context, coredb.ListRebuildTasksParams) ([]coredb.ListRebuildTasksRow, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetRebuildTaskForPackageVersion(context.Context, coredb.GetRebuildTaskForPackageVersionParams) (coredb.RebuildTask, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) GetAPIKeyOwner(ctx context.Context, key string) (string, error) {
-	panic("not used")
-}
-
-func (m *mockQuerier) InsertUser(ctx context.Context, arg coredb.InsertUserParams) (string, error) {
-	panic("not used")
 }
 
 type mockPublisher struct {
@@ -211,11 +70,11 @@ func TestCreatePackage(t *testing.T) {
 	t.Run("creates package and publishes request", func(t *testing.T) {
 		t.Parallel()
 		db := &mockQuerier{
-			insertPackageFn: func(_ context.Context, arg coredb.InsertPackageParams) (int32, error) {
+			insertPackageFn: func(_ context.Context, arg coredb.InsertPackageParams) (coredb.InsertPackageRow, error) {
 				assert.Equal(t, "express", arg.Identifier)
 				assert.Equal(t, coredb.EcosystemNpm, arg.Ecosystem)
 				assert.False(t, arg.LatestVersion.Valid)
-				return 42, nil
+				return coredb.InsertPackageRow{ID: 42, Inserted: true}, nil
 			},
 		}
 		pub := &mockPublisher{}
@@ -245,13 +104,8 @@ func TestCreatePackage(t *testing.T) {
 	t.Run("returns existing package on duplicate", func(t *testing.T) {
 		t.Parallel()
 		db := &mockQuerier{
-			insertPackageFn: func(context.Context, coredb.InsertPackageParams) (int32, error) {
-				return 0, &pgconn.PgError{Code: "23505"}
-			},
-			listPackagesByEcosystemFn: func(context.Context, coredb.Ecosystem) ([]coredb.ListPackagesByEcosystemRow, error) {
-				return []coredb.ListPackagesByEcosystemRow{
-					{ID: 7, Identifier: "express", Ecosystem: coredb.EcosystemNpm, LatestVersion: pgtype.Text{String: "4.18.0", Valid: true}},
-				}, nil
+			insertPackageFn: func(context.Context, coredb.InsertPackageParams) (coredb.InsertPackageRow, error) {
+				return coredb.InsertPackageRow{ID: 7, Inserted: false}, nil
 			},
 		}
 		pub := &mockPublisher{}
@@ -313,8 +167,8 @@ func TestCreatePackage(t *testing.T) {
 	t.Run("returns 500 on non-duplicate db error", func(t *testing.T) {
 		t.Parallel()
 		db := &mockQuerier{
-			insertPackageFn: func(context.Context, coredb.InsertPackageParams) (int32, error) {
-				return 0, assert.AnError
+			insertPackageFn: func(context.Context, coredb.InsertPackageParams) (coredb.InsertPackageRow, error) {
+				return coredb.InsertPackageRow{}, assert.AnError
 			},
 		}
 		handler := private.NewPackageHandler(db, &mockPublisher{})
@@ -331,8 +185,8 @@ func TestCreatePackage(t *testing.T) {
 	t.Run("still succeeds when publish fails", func(t *testing.T) {
 		t.Parallel()
 		db := &mockQuerier{
-			insertPackageFn: func(context.Context, coredb.InsertPackageParams) (int32, error) {
-				return 1, nil
+			insertPackageFn: func(context.Context, coredb.InsertPackageParams) (coredb.InsertPackageRow, error) {
+				return coredb.InsertPackageRow{ID: 1, Inserted: true}, nil
 			},
 		}
 		pub := &mockPublisher{err: assert.AnError}
@@ -351,8 +205,8 @@ func TestCreatePackage(t *testing.T) {
 		t.Parallel()
 		for _, eco := range []string{"npm", "go", "cargo", "pypi"} {
 			db := &mockQuerier{
-				insertPackageFn: func(context.Context, coredb.InsertPackageParams) (int32, error) {
-					return 1, nil
+				insertPackageFn: func(context.Context, coredb.InsertPackageParams) (coredb.InsertPackageRow, error) {
+					return coredb.InsertPackageRow{ID: 1, Inserted: true}, nil
 				},
 			}
 			handler := private.NewPackageHandler(db, &mockPublisher{})

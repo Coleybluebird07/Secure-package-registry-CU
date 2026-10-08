@@ -66,7 +66,7 @@ compose.yml                  Local service stack
 ### Requirements
 
 - Git and Docker with Docker Compose.
-- For Go development, a toolchain compatible with `go.mod`, which specifies Go 1.25.6 in this snapshot.
+- For Go development, a toolchain compatible with `go.mod`, which specifies Go 1.26 in this snapshot.
 - For frontend development and repository checks, Bun. The optional `just` task runner exposes the commands in `justfile`.
 
 ### Start the development stack
@@ -87,7 +87,7 @@ The Compose configuration defines these local entry points:
 | MinIO console | `http://localhost:10004` |
 | Gitea | `http://localhost:10005` |
 
-The default configuration sets `SPR_MOCK=true`, which seeds development data. It does not mean that external rebuild dependencies are simulated or that every package can be rebuilt.
+Register the first account through the dashboard to create the initial administrator. The automatic seed service has been removed. External rebuild dependencies are not simulated, and not every package can be rebuilt.
 
 This is a local development configuration with demonstration credentials. The main service mounts the Docker socket to support rebuilds, giving it access to the host Docker daemon. Run it in a development environment you control.
 

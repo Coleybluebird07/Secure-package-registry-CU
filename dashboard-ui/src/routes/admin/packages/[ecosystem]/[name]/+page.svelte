@@ -177,10 +177,36 @@
       loadVersions();
     }
   });
+  async function downloadArtifact(
+    taskId: number,
+    kind: "metadata" | "logs" | "diffoscope" | "official" | "rebuilt",
+    version: string,
+  ) {
+    try {
+      const blob = await rebuildAPI.getArtifactBlob(taskId, kind);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      const extension =
+        kind === "diffoscope"
+          ? "html"
+          : kind === "metadata"
+            ? "json"
+            : kind === "logs"
+              ? "log"
+              : "tgz";
+      link.download = `rebuild-${taskId}-${kind}.${extension}`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      rebuildErrorByVersion[version] =
+        err instanceof Error ? err.message : "Artifact download failed";
+    }
+  }
 </script>
 
 <div class="page">
-  <a href="/admin" class="back-link">
+  <a href="/admin/packages" class="back-link">
     <ArrowLeft class="icon-back" />
     Back to packages
   </a>
@@ -313,24 +339,39 @@
 
                   <div class="artifact-links">
                     {#if rebuild.metadata_url}
-                      <a href={rebuild.metadata_url} class="artifact-link">
+                      <button
+                        type="button"
+                        onclick={() =>
+                          downloadArtifact(rebuild.id, "metadata", version)}
+                        class="artifact-link"
+                      >
                         <FileText class="icon-xs" />
                         Metadata
-                      </a>
+                      </button>
                     {/if}
 
                     {#if rebuild.logs_url}
-                      <a href={rebuild.logs_url} class="artifact-link">
+                      <button
+                        type="button"
+                        onclick={() =>
+                          downloadArtifact(rebuild.id, "logs", version)}
+                        class="artifact-link"
+                      >
                         <ScrollText class="icon-xs" />
                         Logs
-                      </a>
+                      </button>
                     {/if}
 
                     {#if rebuild.diffoscope_url}
-                      <a href={rebuild.diffoscope_url} class="artifact-link">
+                      <button
+                        type="button"
+                        onclick={() =>
+                          downloadArtifact(rebuild.id, "diffoscope", version)}
+                        class="artifact-link"
+                      >
                         <Activity class="icon-xs" />
                         Diffoscope
-                      </a>
+                      </button>
                     {/if}
 
                     {#if rebuild.has_official_artifact && rebuild.has_rebuilt_artifact}
@@ -344,23 +385,27 @@
                     {/if}
 
                     {#if rebuild.official_artifact_url}
-                      <a
-                        href={rebuild.official_artifact_url}
+                      <button
+                        type="button"
+                        onclick={() =>
+                          downloadArtifact(rebuild.id, "official", version)}
                         class="artifact-link"
                       >
                         <Archive class="icon-xs" />
                         Official
-                      </a>
+                      </button>
                     {/if}
 
                     {#if rebuild.rebuilt_artifact_url}
-                      <a
-                        href={rebuild.rebuilt_artifact_url}
+                      <button
+                        type="button"
+                        onclick={() =>
+                          downloadArtifact(rebuild.id, "rebuilt", version)}
                         class="artifact-link"
                       >
                         <Archive class="icon-xs" />
                         Rebuilt
-                      </a>
+                      </button>
                     {/if}
                   </div>
                 {:else}

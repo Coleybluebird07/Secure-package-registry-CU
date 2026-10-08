@@ -43,6 +43,7 @@ func NewAdminHandler(db coredb.Querier, publisher message.Publisher, minio *sprm
 	}
 
 	r := chi.NewRouter()
+	r.Get("/review", h.ListReviewQueue)
 	r.Get("/packages", h.ListPackages)
 	r.Post("/packages", h.AddPackage)
 	r.Get("/packages/{ecosystem}/{identifier}/versions", h.ListVersions)
@@ -52,6 +53,8 @@ func NewAdminHandler(db coredb.Querier, publisher message.Publisher, minio *sprm
 	r.Get("/packages/{ecosystem}/{identifier}/rebuild", h.GetRebuildForPackage)
 	r.Post("/packages/{ecosystem}/{identifier}/rebuild", h.TriggerRebuild)
 
+	r.Get("/packages/{ecosystem}/{identifier}/versions/{version}/review", h.GetReviewStatus)
+	r.Post("/packages/{ecosystem}/{identifier}/versions/{version}/review", h.SubmitReview)
 	r.Get("/tasks", h.ListTasks)
 	r.Get("/tasks/{taskID}/artifact", h.DownloadArtifact)
 
@@ -85,33 +88,20 @@ func (h *AdminHandler) ListPackages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type packageResponse struct {
-		ID            int32   `json:"id"`
-		Identifier    string  `json:"identifier"`
-		Ecosystem     string  `json:"ecosystem"`
-		LatestVersion *string `json:"latest_version"`
-	}
-
-	items := make([]packageResponse, 0, len(packages))
+	items := make([]PackageListItem, 0, len(packages))
 	for _, pkg := range packages {
-		resp := packageResponse{
+		item := PackageListItem{
 			ID:         pkg.ID,
 			Identifier: pkg.Identifier,
 			Ecosystem:  string(pkg.Ecosystem),
 		}
 		if pkg.LatestVersion.Valid {
-			resp.LatestVersion = &pkg.LatestVersion.String
+			item.LatestVersion = &pkg.LatestVersion.String
 		}
-		items = append(items, resp)
+		items = append(items, item)
 	}
 
-	render.JSON(w, r, map[string]any{"items": items})
-}
-
-// AddPackageRequest is the request body for AddPackage.
-type AddPackageRequest struct {
-	Identifier string `json:"identifier"`
-	Ecosystem  string `json:"ecosystem"`
+	render.JSON(w, r, PackageListResponse{Items: items})
 }
 
 // AddPackage creates a new package in the watch list and publishes spr.package.requested.
@@ -143,13 +133,13 @@ func (h *AdminHandler) AddPackage(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	packageID, err := h.db.InsertPackage(ctx, coredb.InsertPackageParams{
+	result, err := h.db.InsertPackage(ctx, coredb.InsertPackageParams{
 		Identifier:    req.Identifier,
 		Ecosystem:     ecosystem,
 		LatestVersion: pgtype.Text{Valid: false},
 	})
 
-	alreadyExists := false
+	alreadyExists := !result.Inserted
 	if err != nil {
 		h.log.Error().Err(err).Str("identifier", req.Identifier).Msg("Failed to insert package")
 		render.Status(r, http.StatusInternalServerError)
@@ -167,11 +157,11 @@ func (h *AdminHandler) AddPackage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	render.Status(r, status)
-	render.JSON(w, r, map[string]any{
-		"id":             packageID,
-		"identifier":     req.Identifier,
-		"ecosystem":      req.Ecosystem,
-		"already_exists": alreadyExists,
+	render.JSON(w, r, AddPackageResponse{
+		ID:            result.ID,
+		Identifier:    req.Identifier,
+		Ecosystem:     req.Ecosystem,
+		AlreadyExists: alreadyExists,
 	})
 }
 
@@ -218,17 +208,12 @@ func (h *AdminHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		latestVersion = &pkg.LatestVersion.String
 	}
 
-	render.JSON(w, r, map[string]any{
-		"identifier":     identifier,
-		"ecosystem":      ecoStr,
-		"latest_version": latestVersion,
-		"versions":       versions,
+	render.JSON(w, r, ListVersionsResponse{
+		Identifier:    identifier,
+		Ecosystem:     ecoStr,
+		LatestVersion: latestVersion,
+		Versions:      versions,
 	})
-}
-
-// TriggerScanRequest is the optional request body for TriggerScan.
-type TriggerScanRequest struct {
-	Version string `json:"version"`
 }
 
 // TriggerScan triggers a behavioral analysis scan for a package version.
@@ -327,12 +312,12 @@ func (h *AdminHandler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 		Msg("Triggered scan via admin API")
 
 	render.Status(r, http.StatusCreated)
-	render.JSON(w, r, map[string]any{
-		"task_id":    task.ID,
-		"identifier": identifier,
-		"ecosystem":  ecoStr,
-		"version":    version,
-		"status":     "pending",
+	render.JSON(w, r, TriggerScanResponse{
+		TaskID:     task.ID,
+		Identifier: identifier,
+		Ecosystem:  ecoStr,
+		Version:    version,
+		Status:     "pending",
 	})
 }
 
@@ -564,6 +549,12 @@ func (h *AdminHandler) GetBehavior(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rawKey := task.ArtifactKey.String
+	if !strings.HasSuffix(rawKey, "behavior.jsonl") {
+		h.log.Error().Str("key", rawKey).Msg("Unexpected artifact key format")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "unexpected artifact key format"})
+		return
+	}
 	dedupedKey := strings.TrimSuffix(rawKey, "behavior.jsonl") + "behavior-deduped.json"
 
 	data, err := h.minio.GetObject(ctx, dedupedKey)
@@ -619,6 +610,15 @@ func (h *AdminHandler) GetBehaviorRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Derive the raw JSON key from the raw artifact key.
+	// Raw JSONL: behavior/{eco}/{pkg}/{ver}/{src}/behavior.jsonl
+	// Raw tree:  behavior/{eco}/{pkg}/{ver}/{src}/behavior-raw.json
+	if !strings.HasSuffix(task.ArtifactKey.String, "behavior.jsonl") {
+		h.log.Error().Str("key", task.ArtifactKey.String).Msg("Unexpected artifact key format")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "unexpected artifact key format"})
+		return
+	}
 	rawKey := strings.TrimSuffix(task.ArtifactKey.String, "behavior.jsonl") + "behavior-raw.json"
 
 	data, err := h.minio.GetObject(ctx, rawKey)
@@ -675,23 +675,9 @@ func (h *AdminHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type taskResponse struct {
-		ID            int32   `json:"id"`
-		Identifier    string  `json:"identifier"`
-		Ecosystem     string  `json:"ecosystem"`
-		Version       string  `json:"version"`
-		Source        string  `json:"source"`
-		Status        string  `json:"status"`
-		FailureReason *string `json:"failure_reason,omitempty"`
-		HasArtifact   bool    `json:"has_artifact"`
-		StartedAt     *string `json:"started_at,omitempty"`
-		CompletedAt   *string `json:"completed_at,omitempty"`
-		CreatedAt     string  `json:"created_at"`
-	}
-
-	items := make([]taskResponse, 0, len(tasks))
+	items := make([]TaskListItem, 0, len(tasks))
 	for _, t := range tasks {
-		resp := taskResponse{
+		item := TaskListItem{
 			ID:          t.ID,
 			Identifier:  t.Identifier,
 			Ecosystem:   t.PEcosystem,
@@ -701,23 +687,23 @@ func (h *AdminHandler) ListTasks(w http.ResponseWriter, r *http.Request) {
 			HasArtifact: t.ArtifactBucket.Valid && t.ArtifactKey.Valid,
 		}
 		if t.FailureReason.Valid {
-			resp.FailureReason = &t.FailureReason.String
+			item.FailureReason = &t.FailureReason.String
 		}
 		if t.StartedAt.Valid {
 			s := t.StartedAt.Time.String()
-			resp.StartedAt = &s
+			item.StartedAt = &s
 		}
 		if t.CompletedAt.Valid {
 			s := t.CompletedAt.Time.String()
-			resp.CompletedAt = &s
+			item.CompletedAt = &s
 		}
 		if t.CreatedAt.Valid {
-			resp.CreatedAt = t.CreatedAt.Time.String()
+			item.CreatedAt = t.CreatedAt.Time.String()
 		}
-		items = append(items, resp)
+		items = append(items, item)
 	}
 
-	render.JSON(w, r, map[string]any{"items": items})
+	render.JSON(w, r, TaskListResponse{Items: items})
 }
 
 // DownloadArtifact streams the behavioral analysis artifact for a completed collection task.
@@ -1080,6 +1066,202 @@ func rebuildArtifactInfo(task coredb.RebuildTask, kind string) (key string, cont
 	}
 }
 
+// ListReviewQueue returns package versions that failed behavioral analysis,
+// along with their manual review status.
+func (h *AdminHandler) ListReviewQueue(w http.ResponseWriter, r *http.Request) {
+	var ecosystem coredb.NullEcosystem
+	if ecoStr := r.URL.Query().Get("ecosystem"); ecoStr != "" {
+		eco := coredb.Ecosystem(ecoStr)
+		if !validEcosystem(eco) {
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, map[string]string{"error": "invalid ecosystem: " + ecoStr})
+			return
+		}
+		ecosystem = coredb.NullEcosystem{Ecosystem: eco, Valid: true}
+	}
+
+	rows, err := h.db.ListPackageVersionsForReview(r.Context(), ecosystem)
+	if err != nil {
+		h.log.Error().Err(err).Msg("Failed to list review queue")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to list review queue"})
+		return
+	}
+
+	statusFilter := r.URL.Query().Get("status")
+
+	items := make([]ReviewQueueItem, 0, len(rows))
+	for _, row := range rows {
+		item := ReviewQueueItem{
+			Identifier:       row.Identifier,
+			Ecosystem:        row.PEcosystem,
+			Version:          row.Version,
+			IsLatest:         row.IsLatest,
+			ManuallyApproved: boolPtrFromJSONB(row.ManuallyApproved),
+			ReviewComment:    stringPtrFromJSONB(row.ReviewComment),
+		}
+
+		// Apply status filter in Go.
+		switch statusFilter {
+		case "unreviewed":
+			if item.ManuallyApproved != nil {
+				continue
+			}
+		case "approved":
+			if item.ManuallyApproved == nil || !*item.ManuallyApproved {
+				continue
+			}
+		case "rejected":
+			if item.ManuallyApproved == nil || *item.ManuallyApproved {
+				continue
+			}
+		}
+
+		items = append(items, item)
+	}
+
+	render.JSON(w, r, ReviewQueueResponse{Items: items})
+}
+
+// GetReviewStatus returns the current manual review status for a package version.
+func (h *AdminHandler) GetReviewStatus(w http.ResponseWriter, r *http.Request) {
+	ecoStr := chi.URLParam(r, "ecosystem")
+	identifier, _ := url.PathUnescape(chi.URLParam(r, "identifier"))
+	version := chi.URLParam(r, "version")
+
+	ecosystem := coredb.Ecosystem(ecoStr)
+	if !validEcosystem(ecosystem) {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid ecosystem: " + ecoStr})
+		return
+	}
+
+	row, err := h.db.GetVersionReviewStatus(r.Context(), coredb.GetVersionReviewStatusParams{
+		Ecosystem:  ecosystem,
+		Identifier: identifier,
+		Version:    version,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		render.Status(r, http.StatusNotFound)
+		render.JSON(w, r, map[string]string{"error": "package version not found"})
+		return
+	}
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Str("version", version).Msg("Failed to get review status")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to get review status"})
+		return
+	}
+
+	render.JSON(w, r, ReviewStatusResponse{
+		ManuallyApproved: boolPtrFromJSONB(row.ManuallyApproved),
+		ReviewComment:    stringPtrFromJSONB(row.ReviewComment),
+	})
+}
+
+// SubmitReview sets the manual_review and review_comment tags on a package version.
+func (h *AdminHandler) SubmitReview(w http.ResponseWriter, r *http.Request) {
+	ecoStr := chi.URLParam(r, "ecosystem")
+	identifier, _ := url.PathUnescape(chi.URLParam(r, "identifier"))
+	version := chi.URLParam(r, "version")
+
+	ecosystem := coredb.Ecosystem(ecoStr)
+	if !validEcosystem(ecosystem) {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid ecosystem: " + ecoStr})
+		return
+	}
+
+	var req SubmitReviewRequest
+	if err := render.DecodeJSON(r.Body, &req); err != nil {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.Comment == "" {
+		render.Status(r, http.StatusBadRequest)
+		render.JSON(w, r, map[string]string{"error": "comment is required"})
+		return
+	}
+
+	ctx := r.Context()
+
+	// Look up the package version ID.
+	pvID, err := h.db.GetPackageVersionID(ctx, coredb.GetPackageVersionIDParams{
+		Ecosystem:  ecosystem,
+		Identifier: identifier,
+		Version:    version,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		render.Status(r, http.StatusNotFound)
+		render.JSON(w, r, map[string]string{"error": "package version not found"})
+		return
+	}
+	if err != nil {
+		h.log.Error().Err(err).Str("identifier", identifier).Str("version", version).Msg("Failed to look up package version")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to look up package version"})
+		return
+	}
+
+	// Upsert the manually_approved tag.
+	approvedTagType, err := h.db.GetTagTypeByLabel(ctx, "manually_approved")
+	if err != nil {
+		h.log.Error().Err(err).Msg("Failed to look up manually_approved tag type")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to look up tag type"})
+		return
+	}
+	approvedValue := []byte("false")
+	if req.Approved {
+		approvedValue = []byte("true")
+	}
+	if err := h.db.InsertPackageTag(ctx, coredb.InsertPackageTagParams{
+		PackageVersion: pvID,
+		TagType:        approvedTagType,
+		Value:          approvedValue,
+	}); err != nil {
+		h.log.Error().Err(err).Msg("Failed to set manually_approved tag")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to save review"})
+		return
+	}
+
+	// Upsert the review_comment tag.
+	commentTagType, err := h.db.GetTagTypeByLabel(ctx, "review_comment")
+	if err != nil {
+		h.log.Error().Err(err).Msg("Failed to look up review_comment tag type")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to look up tag type"})
+		return
+	}
+	// Store the comment as a JSON string value.
+	commentValue := fmt.Appendf(nil, "%q", req.Comment)
+	if err := h.db.InsertPackageTag(ctx, coredb.InsertPackageTagParams{
+		PackageVersion: pvID,
+		TagType:        commentTagType,
+		Value:          commentValue,
+	}); err != nil {
+		h.log.Error().Err(err).Msg("Failed to set review_comment tag")
+		render.Status(r, http.StatusInternalServerError)
+		render.JSON(w, r, map[string]string{"error": "failed to save review comment"})
+		return
+	}
+
+	h.log.Info().
+		Str("package", identifier).
+		Str("version", version).
+		Bool("approved", req.Approved).
+		Msg("Manual review submitted")
+
+	approved := req.Approved
+	comment := req.Comment
+	render.JSON(w, r, ReviewStatusResponse{
+		ManuallyApproved: &approved,
+		ReviewComment:    &comment,
+	})
+}
+
 func (h *AdminHandler) publishPackageRequested(identifier, ecosystem string) error {
 	req := messages.PackageRequest{
 		Ecosystem:  ecosystem,
@@ -1101,4 +1283,27 @@ func validEcosystem(eco coredb.Ecosystem) bool {
 	default:
 		return false
 	}
+}
+
+// boolPtrFromJSONB converts a JSONB []byte (e.g. "true", "false", or nil) to *bool.
+func boolPtrFromJSONB(data []byte) *bool {
+	if data == nil {
+		return nil
+	}
+	val := string(data) == "true"
+	return &val
+}
+
+// stringPtrFromJSONB converts a JSONB []byte (e.g. `"some text"` or nil) to *string.
+// It strips the outer JSON quotes from the stored string value.
+func stringPtrFromJSONB(data []byte) *string {
+	if data == nil {
+		return nil
+	}
+	s := string(data)
+	// JSONB text values are stored as quoted JSON strings.
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
+	}
+	return &s
 }

@@ -189,36 +189,173 @@ export interface ConnectionBehavior {
 // Public search types (used by /api/v1/svc/ endpoints)
 
 export interface PackageSummary {
+	ecosystem: Ecosystem;
 	identifier: string;
-	ecosystem: "npm" | "go" | "cargo" | "pypi";
 	latest_version: string;
-	description: string;
-	author: string;
-	updatedAgo: string;
-	trustScore: number;
-	tier: string;
-	tags: string[];
 }
 
 export interface SearchResult {
 	items: PackageSummary[];
+	page: number;
+	page_size: number;
+	total_count: number;
 }
 
 export interface PackageVersionDetail {
-	identifier: string;
 	ecosystem: string;
-	version: string;
+	identifier: string;
 	latest: boolean;
-	source: {
-		url: string;
-		tag: string;
-		commit: string;
-	};
-	trust_level: number;
 	maintainer_notes: string;
+	source: {
+		commit: string;
+		tag: string;
+		url: string;
+	};
 	tags: Array<{
+		data: string; // base64 encoded JSON
 		label: string;
 		value_type: "boolean" | "integer" | "float";
-		data: string; // base64 encoded JSON
 	}>;
+	trust_level: number;
+	version: string;
+}
+
+export interface VerifyResponse {
+	ecosystem: string;
+	identifier: string;
+	oss_rebuild: boolean;
+	upstream_attestation: boolean;
+	version: string;
+}
+
+// Version list types (public endpoint)
+
+export interface VersionSummary {
+	behavior_passed: boolean | null;
+	has_attestation: boolean;
+	has_oss_rebuild: boolean;
+	has_reproducible: boolean;
+	latest: boolean;
+	manually_approved: boolean | null;
+	review_comment: string | null;
+	source: {
+		commit: string;
+		tag: string;
+		url: string;
+	};
+	version: string;
+}
+
+export interface VersionListResult {
+	ecosystem: Ecosystem;
+	identifier: string;
+	versions: VersionSummary[];
+}
+
+// Project dependency tracking types
+
+export type DependencyType = "direct" | "transitive";
+
+export interface Project {
+	id: number;
+	name: string;
+	source_type: string;
+	created_at?: string;
+	updated_at?: string;
+}
+
+export interface ProjectDependency {
+	behavior_passed: boolean | null;
+	dependency_type: DependencyType;
+	ecosystem: string;
+	has_attestation: boolean | null;
+	has_oss_rebuild: boolean | null;
+	has_reproducible: boolean | null;
+	id: number;
+	identifier: string;
+	version: string;
+	version_constraint?: string;
+}
+
+export interface ProjectSummaryRow {
+	behavior_passed: number;
+	dependency_type: DependencyType;
+	has_attestation: number;
+	has_oss_rebuild: number;
+	has_reproducible: number;
+	total: number;
+}
+
+export interface ListProjectsResponse {
+	items: Project[];
+}
+
+export interface UploadProjectResponse {
+	id: number;
+	name: string;
+	source_type: string;
+	total_deps: number;
+	direct_deps: number;
+}
+
+export interface ListProjectDependenciesResponse {
+	items: ProjectDependency[];
+}
+
+export interface ProjectSummaryResponse {
+	project_id: number;
+	summary: ProjectSummaryRow[];
+}
+
+// Admin review queue types
+
+export interface ReviewQueueItem {
+	ecosystem: string;
+	identifier: string;
+	is_latest: boolean;
+	manually_approved: boolean | null;
+	review_comment: string | null;
+	version: string;
+}
+
+export interface ReviewQueueResponse {
+	items: ReviewQueueItem[];
+}
+
+export interface ReviewStatusResponse {
+	manually_approved: boolean | null;
+	review_comment: string | null;
+}
+
+// Project policy types
+
+export interface ProjectPolicy {
+	project_id: number;
+	require_provenance: boolean;
+	require_behavior: boolean;
+	allow_manual_review: boolean;
+}
+
+export interface UpdatePolicyRequest {
+	require_provenance?: boolean;
+	require_behavior?: boolean;
+	allow_manual_review?: boolean;
+}
+
+// Project API key types
+
+export interface ProjectAPIKey {
+	id: string;
+	name: string;
+	prefix: string;
+	expires_at?: string;
+	created_at: string;
+}
+
+export interface CreateAPIKeyResponse extends ProjectAPIKey {
+	key: string; // raw key, shown only once
+}
+
+export interface ProjectAPIKeyListResponse {
+	items: ProjectAPIKey[];
 }

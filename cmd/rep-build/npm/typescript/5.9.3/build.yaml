@@ -1,0 +1,4 @@
+template: npm
+repo_url: https://github.com/microsoft/TypeScript.git
+commit_sha: c63de15a992d37f0d6cec03ac7631872838602cb
+githead_injection: true
