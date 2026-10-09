@@ -24,7 +24,7 @@ Do not merge every remaining branch. Branch names and ahead counts do not establ
 ## Validation
 
 - Both web interfaces: type checks, configured formatting/lint checks and production builds pass.
-- Go lint: zero issues.
+- Go lint: zero issues. Race checks pass for rebuild-worker, package-watcher and the private package API.
 - All Go packages compile; rebuild-worker, package-watcher, private API, config, Gitea, npm, lockfile and OSS Rebuild test suites pass.
 - Full `go test ./...` still fails seven behavior tests because the repository does not include `context-references/sample-behaviors/{safe,safe-2,malicious}.jsonl`. The untouched main baseline has the same missing-fixture failures and additionally fails compilation with undefined `NullSecurityLevel`; the compilation error is repaired here. Tests were not skipped or weakened to conceal missing fixtures.
 - All 15 migration files apply successfully to a fresh PostgreSQL database. An upgrade sequence preserves an existing package row. Rollback was exercised in an isolated temporary schema.

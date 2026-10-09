@@ -7,5 +7,3 @@ END $$;
 ALTER TABLE package_versions ADD COLUMN IF NOT EXISTS security_level SECURITY_LEVEL DEFAULT 'mirror';
 
 ALTER TABLE organization_packages ADD COLUMN IF NOT EXISTS security_level SECURITY_LEVEL DEFAULT 'mirror';
-
-
