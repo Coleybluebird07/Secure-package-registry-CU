@@ -1,1 +1,1 @@
-DROP TABLE organisation_packages;
+DROP TABLE organization_packages;

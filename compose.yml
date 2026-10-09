@@ -162,9 +162,9 @@ services:
       - DIFFOSCOPE_TIMEOUT=${DIFFOSCOPE_TIMEOUT:-2m}
       - MAX_REBUILD_ARTIFACT_SIZE=${MAX_REBUILD_ARTIFACT_SIZE:-104857600}
       - MAX_DIFFOSCOPE_REPORT_SIZE=${MAX_DIFFOSCOPE_REPORT_SIZE:-52428800}
-      - SPR_MOCK=true
+      - SPR_MOCK=false
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 8080 || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -180,6 +180,8 @@ services:
     environment:
       - PORT=3000
       - HOST=0.0.0.0
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
+      - PUBLIC_DASHBOARD_BASE_URL=${PUBLIC_DASHBOARD_BASE_URL:-http://localhost:7001}
       - POSTGRES_HOST=core_db
       - POSTGRES_PORT=5432
       - POSTGRES_USER=postgres

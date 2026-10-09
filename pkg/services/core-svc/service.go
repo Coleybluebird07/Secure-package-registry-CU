@@ -8,16 +8,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"git.duti.dev/secure-package-registry/internal/gen/coredb"
 	"git.duti.dev/secure-package-registry/internal/messages"
+	"git.duti.dev/secure-package-registry/pkg/behavior"
+	"git.duti.dev/secure-package-registry/pkg/gitea"
 	"git.duti.dev/secure-package-registry/pkg/logger"
 	sprminio "git.duti.dev/secure-package-registry/pkg/minio"
+	"git.duti.dev/secure-package-registry/pkg/npm"
+	ossrebuild "git.duti.dev/secure-package-registry/pkg/oss-rebuild"
 	"git.duti.dev/secure-package-registry/pkg/pkgdb"
 	"git.duti.dev/secure-package-registry/pkg/services"
 	"git.duti.dev/secure-package-registry/pkg/services/core-svc/server"
+	"git.duti.dev/secure-package-registry/pkg/verification"
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill-amqp/v3/pkg/amqp"
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -109,20 +117,24 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("subscribing to rebuild completions: %w", err)
 	}
 
-	// Run consumers in separate goroutines; report fatal errors via channels.
-	updatedErr := make(chan error, 1)
-	go func() {
-		if err := consumePackageUpdated(ctx, queries, publisher, updatedCh); err != nil {
-			updatedErr <- err
+	// Subscriber for spr.project.processing.requested (async project uploads).
+	projectSub, err := amqp.NewSubscriber(
+		amqp.NewDurableQueueConfig(deps.Config.RabbitMQURL),
+		watermill.NewStdLogger(false, false),
+	)
+	if err != nil {
+		return fmt.Errorf("creating project-processing subscriber: %w", err)
+	}
+	defer func() {
+		if cerr := projectSub.Close(); cerr != nil {
+			log.Warn().Err(cerr).Msg("Failed to close project-processing subscriber")
 		}
 	}()
 
-	completedErr := make(chan error, 1)
-	go func() {
-		if err := consumeCollectionCompleted(ctx, queries, completedCh); err != nil {
-			completedErr <- err
-		}
-	}()
+	projectCh, err := projectSub.Subscribe(ctx, "spr.project.processing.requested")
+	if err != nil {
+		return fmt.Errorf("subscribing to project processing requests: %w", err)
+	}
 
 	rebuildCompletedErr := make(chan error, 1)
 	go func() {
@@ -144,12 +156,59 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("creating minio client: %w", err)
 	}
 
+	// Create npm and OSS rebuild clients for verification.
+	npmClient := npm.NewClient(deps.Config.NPM)
+	ossClient := ossrebuild.NewClient(deps.Config.OSSRebuild)
+	verifier := verification.NewService(queries, npmClient, ossClient)
+	npmResolver := npm.NewResolver(npmClient)
+
+	// Load the Gitea config from Valkey for the registry account.
+	giteaConfig, err := deps.Valkey.GetGiteaConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("loading gitea config from valkey: %w", err)
+	}
+	giteaClient := gitea.NewClient(giteaConfig)
+	registryAccount, err := giteaClient.NpmRegistry("registry")
+	if err != nil {
+		return fmt.Errorf("creating gitea registry account client: %w", err)
+	}
+
+	// Run consumers in separate goroutines; report fatal errors via channels.
+	updatedErr := make(chan error, 1)
+	go func() {
+		if err := consumePackageUpdated(ctx, queries, publisher, verifier, updatedCh); err != nil {
+			updatedErr <- err
+		}
+	}()
+
+	completedErr := make(chan error, 1)
+	go func() {
+		if err := consumeCollectionCompleted(ctx, queries, minioClient, completedCh); err != nil {
+			completedErr <- err
+		}
+	}()
+
+	projectErr := make(chan error, 1)
+	go func() {
+		if err := consumeProjectProcessing(ctx, queries, publisher, npmClient, npmResolver, verifier, projectCh); err != nil {
+			projectErr <- err
+		}
+	}()
+
 	externalServer := server.NewExternal("0.0.0.0:"+deps.Config.CoreSvc.ExternalPort, db, server.AdminDeps{
 		Querier:   queries,
 		Publisher: publisher,
 		MinIO:     minioClient,
+	}, server.ProjectDeps{
+		Querier:   queries,
+		Publisher: publisher,
+		NPMClient: npmClient,
+	}, verifier)
+	internalServer := server.NewInternal("0.0.0.0:"+deps.Config.CoreSvc.InternalPort, server.InternalDeps{
+		Querier:         queries,
+		Publisher:       publisher,
+		RegistryAccount: registryAccount,
 	})
-	internalServer := server.NewInternal("0.0.0.0:"+deps.Config.CoreSvc.InternalPort, queries, publisher)
 
 	externalErrCh := externalServer.Start()
 	internalErrCh := internalServer.Start()
@@ -167,9 +226,12 @@ func Start(ctx context.Context, deps *services.Deps) error {
 		return fmt.Errorf("collection-completed consumer: %w", err)
 	case err := <-rebuildCompletedErr:
 		return fmt.Errorf("rebuild-completed consumer: %w", err)
+	case err := <-projectErr:
+		return fmt.Errorf("project-processing consumer: %w", err)
 	}
 
-	shutdownCtx := context.Background()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	var shutdownErr error
 	if err := externalServer.Stop(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("Failed to stop external server")
@@ -195,6 +257,7 @@ func consumePackageUpdated(
 	ctx context.Context,
 	queries *coredb.Queries,
 	publisher message.Publisher,
+	verifier *verification.Service,
 	messagesCh <-chan *message.Message,
 ) error {
 	for {
@@ -207,7 +270,7 @@ func consumePackageUpdated(
 				log.Info().Msg("Package-updated subscription closed")
 				return nil
 			}
-			if err := handlePackageUpdated(ctx, queries, publisher, msg); err != nil {
+			if err := handlePackageUpdated(ctx, queries, publisher, verifier, msg); err != nil {
 				log.Error().Err(err).Msg("Failed to handle package-updated message")
 				msg.Nack()
 				continue
@@ -221,6 +284,7 @@ func handlePackageUpdated(
 	ctx context.Context,
 	queries *coredb.Queries,
 	publisher message.Publisher,
+	verifier *verification.Service,
 	msg *message.Message,
 ) error {
 	var upd messages.PackageUpdated
@@ -261,6 +325,14 @@ func handlePackageUpdated(
 	})
 	if err != nil {
 		return fmt.Errorf("updating package latest version: %w", err)
+	}
+
+	// Auto-verify: check upstream attestation and OSS rebuild status.
+	// Best-effort — errors are logged but don't block ingestion.
+	if _, err := verifier.CheckAndTag(ctx, upd.Ecosystem, upd.Identifier, upd.Version); err != nil {
+		l.Warn().Err(err).Msg("Auto-verification failed (non-fatal)")
+	} else {
+		l.Info().Msg("Auto-verification completed")
 	}
 
 	// Dedup: skip if a collection task is already pending or running.
@@ -381,6 +453,7 @@ func createAndPublishRebuildTask(
 func consumeCollectionCompleted(
 	ctx context.Context,
 	queries *coredb.Queries,
+	minio *sprminio.Client,
 	messagesCh <-chan *message.Message,
 ) error {
 	for {
@@ -393,7 +466,7 @@ func consumeCollectionCompleted(
 				log.Info().Msg("Collection-completed subscription closed")
 				return nil
 			}
-			if err := handleCollectionCompleted(ctx, queries, msg); err != nil {
+			if err := handleCollectionCompleted(ctx, queries, minio, msg); err != nil {
 				log.Error().Err(err).Msg("Failed to handle collection-completed message")
 				msg.Nack()
 				continue
@@ -406,6 +479,7 @@ func consumeCollectionCompleted(
 func handleCollectionCompleted(
 	ctx context.Context,
 	queries *coredb.Queries,
+	minio *sprminio.Client,
 	msg *message.Message,
 ) error {
 	var completed messages.CollectionCompleted
@@ -433,6 +507,13 @@ func handleCollectionCompleted(
 			Str("bucket", completed.ArtifactBucket).
 			Str("key", completed.ArtifactKey).
 			Msg("Collection task succeeded")
+
+		// Best-effort: evaluate the deduped behavior tree and set the
+		// behavior_passed tag. An empty deduped tree (no anomalous behaviors
+		// after baseline subtraction) means the package passed.
+		if err := evaluateBehavior(ctx, queries, minio, completed); err != nil {
+			l.Warn().Err(err).Msg("Failed to evaluate behavioral analysis result")
+		}
 	} else {
 		err := queries.UpdateCollectionTaskFailed(ctx, coredb.UpdateCollectionTaskFailedParams{
 			ID:            completed.TaskID,
@@ -552,4 +633,72 @@ func textOrNull(value string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: value, Valid: true}
+}
+
+// evaluateBehavior downloads the deduped behavior tree from MinIO and sets the
+// behavior_passed tag on the package version. An empty tree (no anomalous
+// behaviors remaining after baseline subtraction) is treated as passed.
+func evaluateBehavior(
+	ctx context.Context,
+	queries *coredb.Queries,
+	minio *sprminio.Client,
+	completed messages.CollectionCompleted,
+) error {
+	// Derive the deduped JSON key from the raw artifact key.
+	// Raw:     behavior/{eco}/{pkg}/{ver}/{src}/behavior.jsonl
+	// Deduped: behavior/{eco}/{pkg}/{ver}/{src}/behavior-deduped.json
+	if !strings.HasSuffix(completed.ArtifactKey, "behavior.jsonl") {
+		return fmt.Errorf("unexpected artifact key format %q: expected suffix behavior.jsonl", completed.ArtifactKey)
+	}
+	dedupedKey := strings.TrimSuffix(completed.ArtifactKey, "behavior.jsonl") + "behavior-deduped.json"
+
+	data, err := minio.GetObject(ctx, dedupedKey)
+	if err != nil {
+		return fmt.Errorf("downloading deduped tree %q: %w", dedupedKey, err)
+	}
+
+	var tree behavior.ProcessTree
+	if err := json.Unmarshal(data, &tree); err != nil {
+		return fmt.Errorf("unmarshalling deduped tree: %w", err)
+	}
+
+	passed := tree.IsEmpty()
+
+	// Look up the package version ID.
+	pvID, err := queries.GetPackageVersionID(ctx, coredb.GetPackageVersionIDParams{
+		Ecosystem:  coredb.Ecosystem(completed.Ecosystem),
+		Identifier: completed.Identifier,
+		Version:    completed.Version,
+	})
+	if err != nil {
+		return fmt.Errorf("looking up package version: %w", err)
+	}
+
+	// Look up the tag type and upsert.
+	tagTypeID, err := queries.GetTagTypeByLabel(ctx, "behavior_passed")
+	if err != nil {
+		return fmt.Errorf("looking up behavior_passed tag type: %w", err)
+	}
+
+	val := []byte(`false`)
+	if passed {
+		val = []byte(`true`)
+	}
+
+	if err := queries.InsertPackageTag(ctx, coredb.InsertPackageTagParams{
+		PackageVersion: pvID,
+		TagType:        tagTypeID,
+		Value:          val,
+	}); err != nil {
+		return fmt.Errorf("upserting behavior_passed tag: %w", err)
+	}
+
+	log.Info().
+		Str("ecosystem", completed.Ecosystem).
+		Str("package", completed.Identifier).
+		Str("version", completed.Version).
+		Bool("passed", passed).
+		Msg("Behavioral analysis evaluated")
+
+	return nil
 }

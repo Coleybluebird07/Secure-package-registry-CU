@@ -6,8 +6,10 @@ import (
 
 	"git.duti.dev/secure-package-registry/internal/gen/coredb"
 	sprminio "git.duti.dev/secure-package-registry/pkg/minio"
+	"git.duti.dev/secure-package-registry/pkg/npm"
 	"git.duti.dev/secure-package-registry/pkg/pkgdb"
 	"git.duti.dev/secure-package-registry/pkg/services/core-svc/handlers/external"
+	"git.duti.dev/secure-package-registry/pkg/verification"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -20,8 +22,15 @@ type AdminDeps struct {
 	MinIO     *sprminio.Client
 }
 
-// NewExternal creates the external API server with public and admin routes.
-func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps) *Server {
+// ProjectDeps bundles the dependencies needed by project API handlers.
+type ProjectDeps struct {
+	Querier   coredb.Querier
+	Publisher message.Publisher
+	NPMClient *npm.Client
+}
+
+// NewExternal creates the external API server with public, admin, and project routes.
+func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps, project ProjectDeps, verifier *verification.Service) *Server {
 	r := chi.NewRouter()
 
 	// Base middleware stack
@@ -38,12 +47,23 @@ func NewExternal(addr string, db *pkgdb.Client, admin AdminDeps) *Server {
 	})
 
 	// API routes
-	r.Route("/api/v1/svc", func(r chi.Router) {
-		r.Mount("/packages", external.NewPackageHandler(db))
+	r.Route("/api/v1/svc/packages", func(r chi.Router) {
+		r.Mount("/", external.NewPackageHandler(db))
+		vh := external.NewVerificationHandler(verifier)
+		r.Post("/{ecosystem}/{identifier}/{version}/verify", vh.Verify)
 	})
 
-	// Admin routes
-	r.Mount("/api/v1/admin", external.NewAdminHandler(admin.Querier, admin.Publisher, admin.MinIO))
+	// Admin routes (authenticated, admin-only)
+	r.Route("/api/v1/admin", func(r chi.Router) {
+		r.Use(external.AdminAuthMiddleware(admin.Querier))
+		r.Mount("/", external.NewAdminHandler(admin.Querier, admin.Publisher, admin.MinIO))
+	})
+
+	// Project routes (authenticated via JWT)
+	r.Route("/api/v1/projects", func(r chi.Router) {
+		r.Use(external.AuthMiddleware())
+		r.Mount("/", external.NewProjectHandler(project.Querier, project.Publisher, verifier, project.NPMClient))
+	})
 
 	return New("external", addr, r)
 }

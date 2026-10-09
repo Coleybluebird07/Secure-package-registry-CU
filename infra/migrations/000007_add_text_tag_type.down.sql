@@ -1,0 +1,1 @@
+-- PostgreSQL enum values cannot be removed safely; retain text on rollback.

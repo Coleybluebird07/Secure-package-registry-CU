@@ -94,6 +94,19 @@
   $effect(() => {
     loadComparison();
   });
+  async function downloadArtifact(kind: "diffoscope" | "official" | "rebuilt") {
+    try {
+      const blob = await rebuildAPI.getArtifactBlob(taskId, kind);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `rebuild-${taskId}-${kind}.${kind === "diffoscope" ? "html" : "tgz"}`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Artifact download failed";
+    }
+  }
 </script>
 
 <div class="page">
@@ -163,21 +176,30 @@
     </div>
 
     <div class="comparison-toolbar">
-      <a
-        href={rebuildAPI.artifactURL(taskId, "diffoscope")}
+      <button
+        type="button"
+        onclick={() => downloadArtifact("diffoscope")}
         class="toolbar-link"
       >
         <FileText class="toolbar-icon" />
-        Open Diffoscope Report
-      </a>
-      <a href={rebuildAPI.artifactURL(taskId, "official")} class="toolbar-link">
+        Download Diffoscope Report
+      </button>
+      <button
+        type="button"
+        onclick={() => downloadArtifact("official")}
+        class="toolbar-link"
+      >
         <Archive class="toolbar-icon" />
         Download Official
-      </a>
-      <a href={rebuildAPI.artifactURL(taskId, "rebuilt")} class="toolbar-link">
+      </button>
+      <button
+        type="button"
+        onclick={() => downloadArtifact("rebuilt")}
+        class="toolbar-link"
+      >
         <Archive class="toolbar-icon" />
         Download Rebuilt
-      </a>
+      </button>
     </div>
 
     <div class="compare-grid">
